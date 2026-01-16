@@ -112,10 +112,25 @@ export class AnthropicClient {
     const tools = options.tools || [];
     const temperature = options.temperature ?? 0.7;
 
-    const formattedMessages = messages.map(m => ({
-      role: m.role,
-      content: m.content
-    }));
+    // 格式化消息，处理工具结果
+    const formattedMessages = messages.map(m => {
+      if (m.role === 'tool') {
+        return {
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: m.toolUseId,
+              content: m.content
+            }
+          ]
+        };
+      }
+      return {
+        role: m.role,
+        content: m.content
+      };
+    });
 
     const requestBody = {
       model: this.model,
