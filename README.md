@@ -28,6 +28,29 @@ Closer Code 是一个强大的命令行 AI 编程助理，可以帮助开发者�
 - **错误诊断**: 智能分析和解决错误
 - **测试运行**: 自动检测并运行测试
 
+### 快捷操作 ⚡
+20+ 预定义快捷操作，提高开发效率：
+- **文件**: `ls`, `cat`, `pwd` - 快速文件操作
+- **Git**: `gs`, `ga`, `gc`, `gp`, `gl` - Git 常用命令
+- **项目**: `build`, `test`, `clean`, `install` - 项目管理
+- **搜索**: `find`, `grep` - 代码搜索
+- **AI**: `explain`, `fix`, `refactor`, `review` - AI 辅助
+
+### 代码片段管理 📦
+- 创建、编辑、删除代码片段
+- 按标签、语言、内容搜索
+- 使用统计和最近使用追踪
+- 导入/导出功能
+- 7+ 预定义模板（React、Express、Python 等）
+
+### Git 集成 🎯
+- Git 仓库状态查询
+- 分支管理（创建、切换、删除）
+- 提交历史查看
+- 远程仓库管理
+- 智能提交助手
+- 仓库统计信息
+
 ### 项目学习
 - 自动学习项目结构和模式
 - 适应项目的编码风格
@@ -148,6 +171,42 @@ npm start
 | `/learn` | 学习项目模式 |
 | `/status` | 显示对话统计 |
 
+### 快捷操作
+
+直接输入快捷命令（无需斜杠）：
+
+```
+❯ ls                    # 列出当前目录
+❯ cat package.json      # 读取文件
+❯ gs                    # Git 状态
+❯ build                 # 运行构建
+❯ test                  # 运行测试
+❯ find "TODO"           # 搜索代码
+```
+
+### 代码片段
+
+```
+❯ 使用 React 组件模板创建一个新组件
+```
+
+```
+❯ 保存这段代码为 snippet
+```
+
+```
+❯ 搜索所有 JavaScript 片段
+```
+
+### Git 操作
+
+```
+❯ 创建新分支 feature/new-api
+❯ 切换到 develop 分支
+❯ 显示最近 5 次提交
+❯ 智能提交当前更改
+```
+
 ### 任务规划示例
 
 ```
@@ -186,11 +245,26 @@ src/
 ├── planner.js         # 任务规划器
 ├── tools.js           # 工具执行器
 ├── search.js          # 代码搜索
+├── shortcuts.js       # 快捷操作管理
+├── snippets.js        # 代码片段管理
+├── git-helper.js      # Git 集成
 ├── config.js          # 配置管理
+├── setup.js           # 设置向导
+├── test-modules.js    # 测试验证
 └── bash-runner.js     # Bash 执行器
 ```
 
 ## 开发
+
+### 快速开始
+
+```bash
+# 运行设置向导
+npm run setup
+
+# 启动应用
+npm start
+```
 
 ### 构建
 
@@ -204,10 +278,16 @@ npm run build
 npm run dev
 ```
 
-### 测试
+### 测试模块
 
 ```bash
 npm test
+```
+
+### 检查编译
+
+```bash
+npm run check
 ```
 
 ## 工作原理
