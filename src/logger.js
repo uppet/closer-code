@@ -7,32 +7,16 @@ import path from 'path';
 import { homedir } from 'os';
 
 const LOG_DIR = path.join(homedir(), '.closer-code/logs');
+const DEBUG_ENABLED = process.env.CLOSER_DEBUG_LOG === '1';
 
 let logFile = null;
 let logStream = null;
-let loggerInitialized = false;
-
-/**
- * 检查是否启用调试
- */
-function isDebugEnabled() {
-  return process.env.CLOSER_DEBUG_LOG === '1';
-}
 
 /**
  * 初始化日志
  */
 export async function initLogger() {
-  if (!isDebugEnabled()) {
-    console.error('[DEBUG] CLOSER_DEBUG_LOG not set to 1, logging disabled');
-    return;
-  }
-
-  if (loggerInitialized) {
-    return;
-  }
-
-  loggerInitialized = true;
+  if (!DEBUG_ENABLED) return;
 
   try {
     await fs.mkdir(LOG_DIR, { recursive: true });
@@ -61,7 +45,7 @@ export async function initLogger() {
  * 写入日志
  */
 async function writeLog(message) {
-  if (!isDebugEnabled() || !logStream) return;
+  if (!DEBUG_ENABLED || !logStream) return;
 
   const timestamp = new Date().toISOString();
   const logMessage = `[${timestamp}] ${message}\n`;
@@ -110,7 +94,7 @@ function formatObject(obj, indent = 0) {
  * 记录配置
  */
 export async function logConfig(config) {
-  if (!isDebugEnabled()) return;
+  if (!DEBUG_ENABLED) return;
 
   await writeLog('--- Configuration ---');
   await writeLog(`AI Provider: ${config.ai.provider}`);
@@ -140,7 +124,7 @@ export async function logConfig(config) {
  * 记录用户消息
  */
 export async function logUserMessage(message) {
-  if (!isDebugEnabled()) return;
+  if (!DEBUG_ENABLED) return;
 
   await writeLog('--- User Message ---');
   await writeLog(`Content: ${message}`);
@@ -152,7 +136,7 @@ export async function logUserMessage(message) {
  * 记录 AI 请求
  */
 export async function logAIRequest(messages, options) {
-  if (!isDebugEnabled()) return;
+  if (!DEBUG_ENABLED) return;
 
   await writeLog('--- AI Request ---');
   await writeLog(`Message Count: ${messages.length}`);
@@ -191,7 +175,7 @@ export async function logAIRequest(messages, options) {
  * 记录流式响应开始
  */
 export async function logStreamStart() {
-  if (!isDebugEnabled()) return;
+  if (!DEBUG_ENABLED) return;
 
   await writeLog('--- Stream Response Started ---');
 }
@@ -200,7 +184,7 @@ export async function logStreamStart() {
  * 记录流式响应数据块
  */
 export async function logStreamChunk(chunk) {
-  if (!isDebugEnabled()) return;
+  if (!DEBUG_ENABLED) return;
 
   await writeLog(`Stream Chunk Type: ${chunk.type}`);
 
@@ -226,7 +210,7 @@ export async function logStreamChunk(chunk) {
  * 记录流式响应结束
  */
 export async function logStreamEnd(fullResponse, toolCalls) {
-  if (!isDebugEnabled()) return;
+  if (!DEBUG_ENABLED) return;
 
   await writeLog('--- Stream Response Ended ---');
   await writeLog(`Total Response Length: ${fullResponse.length} characters`);
@@ -248,7 +232,7 @@ export async function logStreamEnd(fullResponse, toolCalls) {
  * 记录工具调用
  */
 export async function logToolCall(toolName, input, result) {
-  if (!isDebugEnabled()) return;
+  if (!DEBUG_ENABLED) return;
 
   await writeLog('--- Tool Call ---');
   await writeLog(`Tool: ${toolName}`);
@@ -268,7 +252,7 @@ export async function logToolCall(toolName, input, result) {
  * 记录 AI 错误
  */
 export async function logAIError(error) {
-  if (!isDebugEnabled()) return;
+  if (!DEBUG_ENABLED) return;
 
   await writeLog('--- AI Error ---');
   await writeLog(`Error: ${error.message}`);
@@ -280,7 +264,7 @@ export async function logAIError(error) {
  * 记录非流式响应
  */
 export async function logAIResponse(response) {
-  if (!isDebugEnabled()) return;
+  if (!DEBUG_ENABLED) return;
 
   await writeLog('--- AI Response ---');
   await writeLog(`Model: ${response.model}`);
@@ -313,7 +297,7 @@ export async function logAIResponse(response) {
  * 记录会话摘要
  */
 export async function logSessionSummary(conversation) {
-  if (!isDebugEnabled()) return;
+  if (!DEBUG_ENABLED) return;
 
   await writeLog('--- Session Summary ---');
   const summary = conversation.getSummary();
@@ -328,7 +312,7 @@ export async function logSessionSummary(conversation) {
  * 关闭日志
  */
 export async function closeLogger() {
-  if (!isDebugEnabled() || !logStream) return;
+  if (!DEBUG_ENABLED || !logStream) return;
 
   try {
     await logStream.close();
