@@ -1,29 +1,35 @@
 {
-  "name": "spawnbash-ui",
+  "name": "closer-code",
   "version": "1.0.0",
-  "description": "Node.js bash 调用命令行 UI 工具",
-  "main": "dist/cli.js",
+  "description": "AI 编程助理 - 通过对话完成编码、调试和任务规划",
+  "main": "dist/closer-cli.js",
   "type": "module",
   "bin": {
-    "bash-ui": "./dist/cli.js"
+    "closer": "./dist/closer-cli.js"
   },
   "scripts": {
-    "build": "esbuild src/cli.jsx --bundle --platform=node --format=esm --outfile=dist/cli.js --external:ink --external:react --external:ink-text-input --external:ink-select-input --external:ansi-escapes --external:chalk",
-    "start": "npm run build && node dist/cli.js",
-    "dev": "npm run build -- --watch"
+    "setup": "node src/setup.js",
+    "build": "npm run build:cli && npm run build:bash",
+    "build:cli": "esbuild src/closer-cli.jsx --bundle --platform=node --format=esm --outfile=dist/closer-cli.js --external:ink --external:react --external:ink-text-input --external:ink-select-input --external:ansi-escapes --external:chalk --external:glob",
+    "build:bash": "esbuild src/bash-runner.js --bundle --platform=node --format=esm --outfile=dist/bash-runner.js",
+    "start": "npm run build && node dist/closer-cli.js",
+    "dev": "npm run build -- --watch",
+    "test": "node src/test-modules.js",
+    "check": "node --check dist/closer-cli.js"
   },
-  "keywords": ["bash", "cli", "ink"],
+  "keywords": ["ai", "assistant", "cli", "programming", "automation"],
   "author": "",
   "license": "MIT",
   "dependencies": {
     "ink": "^4.4.1",
     "react": "^18.2.0",
-    "ink-select-input": "^5.0.0",
     "ink-text-input": "^5.0.1",
-    "ansi-escapes": "^6.2.0",
-    "chalk": "^5.3.0"
+    "glob": "^10.3.0"
   },
   "devDependencies": {
     "esbuild": "^0.20.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
