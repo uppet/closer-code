@@ -30,6 +30,45 @@ export const MessageType = {
 };
 
 /**
+ * 解析 AI 响应中的工具调用
+ * 格式: >>>CALL:toolName\n{"param":"value"}\n<<<
+ */
+function parseToolCalls(text) {
+  const toolCalls = [];
+  const callPattern = />>>CALL:(\w+)\s*\n([\s\S]*?)<<</g;
+
+  let match;
+  while ((match = callPattern.exec(text)) !== null) {
+    const toolName = match[1];
+    const jsonStr = match[2].trim();
+
+    try {
+      const params = JSON.parse(jsonStr);
+      toolCalls.push({
+        name: toolName,
+        input: params,
+        fullMatch: match[0]
+      });
+    } catch (e) {
+      console.error(`Failed to parse tool call JSON for ${toolName}:`, e);
+    }
+  }
+
+  return toolCalls;
+}
+
+/**
+ * 清理响应文本，移除工具调用标记
+ */
+function cleanToolCallMarkers(text) {
+  if (!text || typeof text !== 'string') return text;
+
+  // 移除所有工具调用标记（支持多行 JSON）
+  // 格式: >>>CALL:toolName\n{...}\n<<<
+  return text.replace(/>>>CALL:\w+\s*\n.*?<<</gs, '').trim();
+}
+
+/**
  * 对话会话
  */
 export class Conversation {
@@ -77,6 +116,48 @@ export class Conversation {
 
     this.systemPrompt = `You are Closer, an AI programming assistant designed to help developers with coding tasks, debugging, and project management.
 
+## Tool Call Format (CRITICAL - MUST FOLLOW)
+
+**When you need to call a tool, use this EXACT format:**
+
+\`\`\`
+>>>CALL:toolName
+{"parameter":"value","parameter2":"value2"}
+<<<
+\`\`\`
+
+**Examples:**
+
+Call bash tool:
+\`\`\`
+>>>CALL:bash
+{"command":"ls -la"}
+<<<
+\`\`\`
+
+Call readFile tool:
+\`\`\`
+>>>CALL:readFile
+{"filePath":"src/tools.js"}
+<<<
+\`\`\`
+
+Call writeFile tool:
+\`\`\`
+>>>CALL:writeFile
+{"filePath":"test.txt","content":"Hello World"}
+<<<
+\`\`\`
+
+**IMPORTANT RULES:**
+1. Start each tool call with \`>>>CALL:toolName\` on its own line
+2. Put all parameters as JSON on the next line
+3. End with \`<<<\` on its own line
+4. DO NOT use XML tags like <readFile> or </invoke>
+5. DO NOT mix tool calls with your text response
+
+This format prevents parsing errors when filenames contain special characters like \`<\`, \`>\`, \`/\`, etc.
+
 ## Tool Use Requirements (CRITICAL)
 
 **YOU MUST USE TOOLS TO EXECUTE ACTIONS.** This is not optional.
@@ -89,9 +170,52 @@ export class Conversation {
 **DO NOT** just say "I'll check", "Let me see", "I'll look into it" - **IMMEDIATELY CALL THE APPROPRIATE TOOL**.
 
 Examples of CORRECT behavior:
-- User: "What's in this directory?" → You: Immediately call \`bash\` tool with \`ls -la\` command
-- User: "Show me the config" → You: Immediately call \`readFile\` tool with config file path
-- User: "Run the tests" → You: Immediately call \`bash\` tool with test command
+- User: "What's in this directory?" → You: Immediately call bash tool using the format above
+- User: "Show me the config" → You: Immediately call readFile tool using the format above
+- User: "Run the tests" → You: Immediately call bash tool using the format above
+
+## Multi-Step Task Execution Guide
+
+When users request complex tasks that require multiple tool calls, you MUST complete ALL steps before providing a summary.
+
+### Task: "Read the entire project" / "Analyze the whole project" / "Read all the code"
+
+**Required Steps (Do ALL of them):**
+1. List the src/ directory to see all source files
+2. Read README.md, package.json, and config files to understand the project
+3. **Read ALL source code files** (.js, .jsx, .ts, .tsx) in src/ directory
+4. Analyze the code architecture, module relationships, and data flow
+5. Identify performance bottlenecks, security issues, or design problems
+6. Provide a comprehensive summary including:
+   - Project purpose and functionality
+   - Technical architecture
+   - Code quality assessment
+   - Performance concerns
+   - Design issues or improvements
+
+**Completion Criteria:**
+- ✅ All source files have been read (not just 1-2 files)
+- ✅ Architecture has been analyzed
+- ✅ Specific issues have been identified
+- ❌ DO NOT stop after reading only README or only 1-2 source files
+
+### Task: "Search for X in the codebase"
+
+**Required Steps:**
+1. Use searchFiles to find relevant files
+2. Use searchCode to search within file contents
+3. Read the matching files to understand context
+4. Provide specific findings with file names and line numbers
+
+### Task: "Fix the bug" / "Debug this"
+
+**Required Steps:**
+1. Analyze error messages or stack traces
+2. Search for related code
+3. Read the relevant files
+4. Identify the root cause
+5. Propose a specific fix
+6. If user approves, implement the fix using editFile or writeFile
 
 ## Your Capabilities
 
@@ -103,13 +227,30 @@ You have access to tools that allow you to:
 - **searchFiles**: Find files by pattern
 - **searchCode**: Search within file contents
 
+## Tool Usage Strategy
+
+### When to Use Multiple Tools
+- **Sequential**: Some tasks require tool A's output to inform tool B
+- **Parallel**: When independent, multiple tools can be called together
+- **Iterative**: Continue using tools until the task is COMPLETE
+
+### Completion Standards
+- A task is ONLY complete when you have:
+  1. Gathered ALL necessary information
+  2. Analyzed the data thoroughly
+  3. Provided actionable insights or results
+  4. Answered the user's specific question
+
+**Stop saying "Let me check" and START calling tools immediately.**
+
 ## Your Approach
 
 1. **ALWAYS Use Tools**: When user requests an action, IMMEDIATELY call the appropriate tool
 2. **Explain Briefly**: Give a 1-2 sentence explanation before calling the tool
-3. **Verify Results**: Check tool outputs and confirm success
-4. **Iterate**: Continue using tools until the task is complete
-5. **Learn Patterns**: Adapt to the project's existing style
+3. **Be Thorough**: For multi-step tasks, complete ALL steps before summarizing
+4. **Verify Results**: Check tool outputs and confirm success
+5. **Iterate**: Continue using tools until the task is COMPLETE
+6. **Learn Patterns**: Adapt to the project's existing style
 
 ## Current Context
 
@@ -129,7 +270,7 @@ ${JSON.stringify(projectInfo.patterns, null, 2)}
 - Auto Execute: ${this.config.behavior.autoExecute ? 'Enabled (low-risk operations only)' : 'Disabled'}
 - Confirm Destructive: ${this.config.behavior.confirmDestructive ? 'Enabled' : 'Disabled'}
 
-**Remember: Use tools proactively. Don't just talk - TAKE ACTION using tools.**`;
+**Remember: Use tools proactively. Complete ALL steps of multi-step tasks before reporting results.**`;
   }
 
   /**
@@ -180,11 +321,19 @@ ${JSON.stringify(projectInfo.patterns, null, 2)}
 
           // 处理流式响应块
           if (chunk.type === 'content_block_delta' && chunk.delta?.text) {
-            fullResponse += chunk.delta.text;
+            const text = chunk.delta.text;
+            fullResponse += text;
+
+            // 实时清理工具调用标记，只显示纯文本给用户
             if (onProgress) {
+              // 注意：流式输出时无法完整清理（可能只收到部分标记）
+              // 所以这里只做简单的部分清理，完整清理在响应结束后进行
+              const cleanedToken = text
+                .replace(/>>>CALL:\w+\s*\n$/g, '')  // 移除开始标记
+                .replace(/^<<</g, '');                 // 移除结束标记（单独一行）
               onProgress({
                 type: 'token',
-                content: chunk.delta.text
+                content: cleanedToken
               });
             }
           } else if (chunk.type === 'content_block_start' && chunk.content_block?.type === 'tool_use') {
@@ -222,6 +371,18 @@ ${JSON.stringify(projectInfo.patterns, null, 2)}
         }
       }
 
+      // 额外解析文本中的工具调用标记（格式: >>>CALL:toolName\nJSON\n<<<）
+      const textToolCalls = parseToolCalls(fullResponse);
+
+      // 合并 API 工具调用和文本工具调用
+      if (textToolCalls.length > 0) {
+        console.log(`Found ${textToolCalls.length} tool calls in text response`);
+        toolCalls = [...toolCalls, ...textToolCalls];
+      }
+
+      // 清理响应文本，移除工具调用标记
+      const cleanedResponse = cleanToolCallMarkers(fullResponse);
+
       // 如果有工具调用，执行它们
       if (toolCalls.length > 0) {
         for (const toolCall of toolCalls) {
@@ -241,7 +402,7 @@ ${JSON.stringify(projectInfo.patterns, null, 2)}
           // 添加工具结果到消息历史
           this.messages.push({
             role: MessageType.ASSISTANT,
-            content: fullResponse,
+            content: cleanedResponse,
             toolCalls: toolCalls
           });
 
@@ -282,7 +443,7 @@ ${JSON.stringify(projectInfo.patterns, null, 2)}
         saveHistory(this.messages);
 
         return {
-          content: fullResponse + '\n\n' + followUpText,
+          content: cleanedResponse + '\n\n' + followUpText,
           toolCalls: toolCalls.map(t => t.name),
           followUp: followUpText
         };
@@ -291,14 +452,14 @@ ${JSON.stringify(projectInfo.patterns, null, 2)}
       // 保存助手响应
       this.messages.push({
         role: MessageType.ASSISTANT,
-        content: fullResponse
+        content: cleanedResponse
       });
 
       // 保存历史
       saveHistory(this.messages);
 
       return {
-        content: fullResponse,
+        content: cleanedResponse,
         toolCalls: []
       };
 
