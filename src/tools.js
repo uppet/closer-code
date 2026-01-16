@@ -23,13 +23,13 @@ export const TOOLS = {
   // 执行 bash 命令
   bash: {
     name: 'bash',
-    description: 'Execute a bash shell command and return the output',
+    description: 'Execute a bash shell command. Use this IMMEDIATELY when user asks to: list/show directory contents (ls, dir), run commands, execute tests, check file info, run git commands, or ANY terminal operation. DO NOT just say "I will check" - CALL THIS TOOL.',
     inputSchema: {
       type: 'object',
       properties: {
         command: {
           type: 'string',
-          description: 'The bash command to execute'
+          description: 'The bash command to execute (e.g., "ls -la", "cat file.txt", "npm test", "git status")'
         },
         timeout: {
           type: 'number',
