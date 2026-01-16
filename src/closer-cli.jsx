@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { render, Box, Text, Static } from 'ink';
+import { render, Box, Text } from 'ink';
 import TextInput from 'ink-text-input';
 import { createConversation } from './conversation.js';
 import { getConfig, updateConfig } from './config.js';
@@ -371,11 +371,9 @@ Type your message or command to get started.`
           {/* 左侧：对话面板 */}
           <Panel title="💬 Conversation" borderColor="blue" flex={2}>
             <Box flexGrow={1} flexDirection="column" overflow="hidden">
-              <Static items={messages}>
-                {(message, index) => (
-                  <MessageItem key={message.key || index} message={message} />
-                )}
-              </Static>
+              {messages.map((message, index) => (
+                <MessageItem key={message.key || index} message={message} />
+              ))}
             </Box>
           </Panel>
 
