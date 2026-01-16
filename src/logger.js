@@ -144,6 +144,10 @@ export async function logAIRequest(messages, options) {
   await writeLog(`Max Tokens: ${options.maxTokens || 'N/A'}`);
   await writeLog(`Tool Count: ${options.tools?.length || 0}`);
 
+  if (options.system) {
+    await writeLog(`System Prompt (first 500 chars):\n${options.system.slice(0, 500)}...`);
+  }
+
   if (options.tools) {
     await writeLog('Available Tools:');
     for (const tool of options.tools) {
@@ -188,21 +192,34 @@ export async function logStreamChunk(chunk) {
 
   await writeLog(`Stream Chunk Type: ${chunk.type}`);
 
+  if (chunk.type === 'content_block_start') {
+    await writeLog(`  Block Type: ${chunk.content_block?.type}`);
+    if (chunk.content_block?.type === 'tool_use') {
+      await writeLog(`  Tool Name: ${chunk.content_block.name}`);
+      await writeLog(`  Tool ID: ${chunk.content_block.id}`);
+    }
+  }
+
   if (chunk.type === 'content_block_delta') {
-    await writeLog(`  Delta Text: ${chunk.delta?.text || '(empty)'}`);
-    await writeLog(`  Delta Length: ${chunk.delta?.text?.length || 0}`);
+    if (chunk.delta?.text) {
+      await writeLog(`  Delta Text: ${chunk.delta?.text || '(empty)'}`);
+      await writeLog(`  Delta Length: ${chunk.delta?.text?.length || 0}`);
+    }
+    if (chunk.delta?.partial_json) {
+      await writeLog(`  Partial JSON: ${chunk.delta.partial_json.slice(0, 100)}...`);
+    }
   }
 
   if (chunk.type === 'content_block_stop') {
     await writeLog(`  Block Type: ${chunk.content_block?.type}`);
-    if (chunk.content_block?.type === 'tool_use') {
-      await writeLog(`  Tool Name: ${chunk.content_block.name}`);
-      await writeLog(`  Tool Input: ${JSON.stringify(chunk.content_block.input).slice(0, 200)}...`);
-    }
+  }
+
+  if (chunk.type === 'message_delta') {
+    await writeLog(`  Stop Reason: ${chunk.delta?.stop_reason}`);
   }
 
   if (chunk.type === 'message_stop') {
-    await writeLog(`  Stop Reason: ${chunk.stop_reason}`);
+    await writeLog(`  Message Stop`);
   }
 }
 

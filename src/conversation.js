@@ -187,19 +187,40 @@ ${JSON.stringify(projectInfo.patterns, null, 2)}
                 content: chunk.delta.text
               });
             }
-          } else if (chunk.type === 'content_block_stop' && chunk.content_block?.type === 'tool_use') {
+          } else if (chunk.type === 'content_block_start' && chunk.content_block?.type === 'tool_use') {
+            // 工具调用开始 - 收集工具信息
             const toolUse = chunk.content_block;
             toolCalls.push({
               id: toolUse.id,
               name: toolUse.name,
-              input: toolUse.input
+              input: null // 稍后在 content_block_delta 中填充
             });
+          } else if (chunk.type === 'content_block_delta' && chunk.delta?.partial_json) {
+            // 工具输入参数通过 partial_json 传递
+            const lastTool = toolCalls[toolCalls.length - 1];
+            if (lastTool) {
+              if (!lastTool.input) {
+                lastTool.input = '';
+              }
+              lastTool.input += chunk.delta.partial_json;
+            }
           }
         }
       );
 
       // 记录流式响应结束
       await logStreamEnd(fullResponse, toolCalls);
+
+      // 解析工具调用的 JSON 输入
+      for (const toolCall of toolCalls) {
+        if (typeof toolCall.input === 'string') {
+          try {
+            toolCall.input = JSON.parse(toolCall.input);
+          } catch (e) {
+            console.error('Failed to parse tool input:', e);
+          }
+        }
+      }
 
       // 如果有工具调用，执行它们
       if (toolCalls.length > 0) {
