@@ -8,6 +8,8 @@ import { render, Box, Text, Static } from 'ink';
 import TextInput from 'ink-text-input';
 import { createConversation } from './conversation.js';
 import { getConfig, updateConfig } from './config.js';
+import { createShortcutManager } from './shortcuts.js';
+import { createSnippetManager, SNIPPET_TEMPLATES } from './snippets.js';
 
 // 面板组件
 function Panel({ title, children, borderColor = 'gray', flex = 1 }) {
