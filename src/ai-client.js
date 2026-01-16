@@ -332,12 +332,12 @@ export function checkConfig(config) {
   switch (provider) {
     case 'anthropic':
       if (!anthropic.apiKey) {
-        throw new Error('Anthropic API key not configured. Set ANTHROPIC_API_KEY environment variable.');
+        throw new Error('Anthropic API key not configured. Set CLOSER_ANTHROPIC_API_KEY environment variable.');
       }
       break;
     case 'openai':
       if (!openai.apiKey) {
-        throw new Error('OpenAI API key not configured. Set OPENAI_API_KEY environment variable.');
+        throw new Error('OpenAI API key not configured. Set CLOSER_OPENAI_API_KEY environment variable.');
       }
       break;
     case 'ollama':

@@ -11,23 +11,23 @@ const MEMORY_FILE = path.join(CONFIG_DIR, 'memory.json');
 const DEFAULT_CONFIG = {
   // AI 提供商配置
   ai: {
-    provider: 'anthropic', // 'anthropic' | 'openai' | 'ollama'
+    provider: process.env.CLOSER_AI_PROVIDER || 'anthropic', // 'anthropic' | 'openai' | 'ollama'
     anthropic: {
-      apiKey: process.env.ANTHROPIC_API_KEY || '',
-      baseURL: 'https://api.anthropic.com',
-      model: 'claude-sonnet-4-5-20250929',
-      maxTokens: 8192
+      apiKey: process.env.CLOSER_ANTHROPIC_API_KEY || '',
+      baseURL: process.env.CLOSER_ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
+      model: process.env.CLOSER_ANTHROPIC_MODEL || 'claude-sonnet-4-5-20250929',
+      maxTokens: parseInt(process.env.CLOSER_ANTHROPIC_MAX_TOKENS || '8192')
     },
     openai: {
-      apiKey: process.env.OPENAI_API_KEY || '',
-      baseURL: 'https://api.openai.com/v1',
-      model: 'gpt-4o',
-      maxTokens: 4096
+      apiKey: process.env.CLOSER_OPENAI_API_KEY || '',
+      baseURL: process.env.CLOSER_OPENAI_BASE_URL || 'https://api.openai.com/v1',
+      model: process.env.CLOSER_OPENAI_MODEL || 'gpt-4o',
+      maxTokens: parseInt(process.env.CLOSER_OPENAI_MAX_TOKENS || '4096')
     },
     ollama: {
-      baseURL: 'http://localhost:11434',
-      model: 'llama3.1',
-      maxTokens: 4096
+      baseURL: process.env.CLOSER_OLLAMA_BASE_URL || 'http://localhost:11434',
+      model: process.env.CLOSER_OLLAMA_MODEL || 'llama3.1',
+      maxTokens: parseInt(process.env.CLOSER_OLLAMA_MAX_TOKENS || '4096')
     }
   },
 

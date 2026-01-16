@@ -191,20 +191,24 @@ Type your message or command to get started.`
           // 处理流式响应
           if (progress.type === 'token') {
             setMessages(prev => {
-              const newMessages = [...prev];
-              const lastMsg = newMessages[newMessages.length - 1];
+              const lastMsg = prev[prev.length - 1];
 
               if (lastMsg && lastMsg.role === 'assistant' && !lastMsg.complete) {
-                lastMsg.content += progress.content;
+                // ✅ 创建新对象，不直接修改
+                return [
+                  ...prev.slice(0, -1),
+                  {
+                    ...lastMsg,
+                    content: lastMsg.content + progress.content
+                  }
+                ];
               } else {
-                newMessages.push({
+                return [...prev, {
                   role: 'assistant',
                   content: progress.content,
                   complete: false
-                });
+                }];
               }
-
-              return newMessages;
             });
           } else if (progress.type === 'tool_start') {
             setToolExecutions(prev => [...prev, {
@@ -224,24 +228,25 @@ Type your message or command to get started.`
 
       // 更新最后的消息为完整响应
       setMessages(prev => {
-        const newMessages = [...prev];
-        const lastIdx = newMessages.findIndex(m => m.role === 'assistant' && !m.complete);
+        const lastIdx = prev.findIndex(m => m.role === 'assistant' && !m.complete);
         if (lastIdx >= 0) {
-          newMessages[lastIdx] = {
-            role: 'assistant',
-            content: response.content,
-            complete: true,
-            toolCalls: response.toolCalls
-          };
+          return [
+            ...prev.slice(0, lastIdx),
+            {
+              role: 'assistant',
+              content: response.content,
+              complete: true,
+              toolCalls: response.toolCalls
+            }
+          ];
         } else {
-          newMessages.push({
+          return [...prev, {
             role: 'assistant',
             content: response.content,
             complete: true,
             toolCalls: response.toolCalls
-          });
+          }];
         }
-        return newMessages;
       });
 
     } catch (error) {

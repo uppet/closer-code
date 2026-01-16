@@ -6,6 +6,19 @@ import { createAIClient, checkConfig } from './ai-client.js';
 import { ToolExecutor, getToolDefinitions } from './tools.js';
 import { TaskPlanner, ProblemDiagnoser } from './planner.js';
 import { loadHistory, saveHistory, loadMemory } from './config.js';
+import {
+  initLogger,
+  logConfig,
+  logUserMessage,
+  logAIRequest,
+  logStreamStart,
+  logStreamChunk,
+  logStreamEnd,
+  logToolCall,
+  logAIError,
+  logAIResponse,
+  logSessionSummary
+} from './logger.js';
 
 // 消息类型
 export const MessageType = {
@@ -34,6 +47,10 @@ export class Conversation {
    * 初始化对话
    */
   async initialize() {
+    // 初始化日志
+    await initLogger();
+    await logConfig(this.config);
+
     // 检查配置
     checkConfig(this.config);
 
@@ -109,6 +126,9 @@ When the user asks you to do something, think about the best approach, explain y
     this.isProcessing = true;
 
     try {
+      // 记录用户消息
+      await logUserMessage(userMessage);
+
       // 添加用户消息
       this.messages.push({
         role: MessageType.USER,
@@ -119,18 +139,28 @@ When the user asks you to do something, think about the best approach, explain y
       const aiClient = createAIClient(this.config);
       const tools = getToolDefinitions(this.config.tools.enabled);
 
+      const requestOptions = {
+        system: this.systemPrompt,
+        tools: tools,
+        temperature: 0.7
+      };
+
+      // 记录 AI 请求
+      await logAIRequest(this.messages, requestOptions);
+
       // 流式响应处理
       let fullResponse = '';
       let toolCalls = [];
 
+      await logStreamStart();
+
       await aiClient.chatStream(
         this.messages,
-        {
-          system: this.systemPrompt,
-          tools: tools,
-          temperature: 0.7
-        },
+        requestOptions,
         (chunk) => {
+          // 记录流式响应块
+          logStreamChunk(chunk);
+
           // 处理流式响应块
           if (chunk.type === 'content_block_delta' && chunk.delta?.text) {
             fullResponse += chunk.delta.text;
@@ -151,6 +181,9 @@ When the user asks you to do something, think about the best approach, explain y
         }
       );
 
+      // 记录流式响应结束
+      await logStreamEnd(fullResponse, toolCalls);
+
       // 如果有工具调用，执行它们
       if (toolCalls.length > 0) {
         for (const toolCall of toolCalls) {
@@ -163,6 +196,9 @@ When the user asks you to do something, think about the best approach, explain y
           }
 
           const result = await this.toolExecutor.execute(toolCall.name, toolCall.input);
+
+          // 记录工具调用
+          await logToolCall(toolCall.name, toolCall.input, result);
 
           // 添加工具结果到消息历史
           this.messages.push({
@@ -186,10 +222,16 @@ When the user asks you to do something, think about the best approach, explain y
           }
         }
 
+        // 记录第二次 AI 请求
+        await logAIRequest(this.messages, { system: this.systemPrompt });
+
         // 获取 AI 对工具结果的响应
         const followUp = await aiClient.chat(this.messages, {
           system: this.systemPrompt
         });
+
+        // 记录 AI 响应
+        await logAIResponse(followUp);
 
         const followUpText = followUp.content.find(c => c.type === 'text')?.text || '';
 
@@ -222,6 +264,9 @@ When the user asks you to do something, think about the best approach, explain y
         toolCalls: []
       };
 
+    } catch (error) {
+      await logAIError(error);
+      throw error;
     } finally {
       this.isProcessing = false;
     }
