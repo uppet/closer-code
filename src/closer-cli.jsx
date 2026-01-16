@@ -124,6 +124,7 @@ function App() {
   const [toolExecutions, setToolExecutions] = useState([]);
   const [status, setStatus] = useState('Initializing...');
   const [messageCounter, setMessageCounter] = useState(0);
+  const [activity, setActivity] = useState(null); // 当前活动描述
 
   // 初始化
   useEffect(() => {
@@ -169,6 +170,7 @@ Type your message or command to get started.`
 
     setInput('');
     setIsProcessing(true);
+    setActivity('📤 发送消息到 AI...');
 
     // 添加用户消息
     const userMsg = { role: 'user', content: value };
@@ -178,16 +180,19 @@ Type your message or command to get started.`
     if (value.startsWith('/')) {
       await handleCommand(value);
       setIsProcessing(false);
+      setActivity(null);
       return;
     }
 
     try {
       // 发送到 AI
+      setActivity('🤔 AI 正在思考...');
       const response = await conversation.sendMessage(
         value,
         (progress) => {
           // 处理流式响应
           if (progress.type === 'token') {
+            setActivity('✍️ AI 正在输入...');
             setMessages(prev => {
               const lastMsg = prev[prev.length - 1];
 
@@ -211,12 +216,14 @@ Type your message or command to get started.`
               }
             });
           } else if (progress.type === 'tool_start') {
+            setActivity(`⚡ 执行工具: ${progress.tool}...`);
             setToolExecutions(prev => [...prev, {
               tool: progress.tool,
               input: progress.input,
               result: null
             }]);
           } else if (progress.type === 'tool_complete') {
+            setActivity('📊 处理工具结果...');
             setToolExecutions(prev => {
               const newExecs = [...prev];
               newExecs[newExecs.length - 1].result = progress.result;
@@ -259,6 +266,7 @@ Type your message or command to get started.`
       }]);
     } finally {
       setIsProcessing(false);
+      setActivity(null);
     }
   }, [conversation, isProcessing]);
 
@@ -270,8 +278,10 @@ Type your message or command to get started.`
 
     switch (command) {
       case '/clear':
+        setActivity('🗑️ 清除对话历史...');
         setMessages([]);
         conversation.clearHistory();
+        setActivity(null);
         break;
 
       case '/plan':
@@ -282,11 +292,14 @@ Type your message or command to get started.`
           }]);
           return;
         }
+        setActivity('📋 规划任务...');
         setStatus('Planning...');
         const planResult = await conversation.planAndExecute(args.join(' '), (progress) => {
           if (progress.type === 'plan_created') {
+            setActivity('📋 任务计划已创建');
             setCurrentPlan(progress.plan);
           } else if (progress.type === 'execution_progress') {
+            setActivity('⚙️ 执行任务中...');
             setCurrentPlan(prev => {
               if (prev && prev.id === progress.event.plan?.id) {
                 return progress.event.plan;
@@ -296,9 +309,11 @@ Type your message or command to get started.`
           }
         });
         setStatus('Ready');
+        setActivity(null);
         break;
 
       case '/learn':
+        setActivity('🧠 学习项目模式...');
         setStatus('Learning...');
         await conversation.learnProject();
         setMessages(prev => [...prev, {
@@ -306,14 +321,17 @@ Type your message or command to get started.`
           content: 'Project patterns learned successfully!'
         }]);
         setStatus('Ready');
+        setActivity(null);
         break;
 
       case '/status':
+        setActivity('📊 获取统计信息...');
         const summary = conversation.getSummary();
         setMessages(prev => [...prev, {
           role: 'system',
           content: JSON.stringify(summary, null, 2)
         }]);
+        setActivity(null);
         break;
 
       case '/help':
@@ -403,12 +421,25 @@ Type your message or command to get started.`
         </Box>
       </Box>
 
+      {/* 活动提示 */}
+      {activity && (
+        <Box
+          borderStyle="round"
+          borderColor="yellow"
+          paddingX={1}
+          marginTop={1}
+          marginBottom={1}
+        >
+          <Text bold color="yellow">{activity}</Text>
+        </Box>
+      )}
+
       {/* 输入区域 */}
       <Box
         borderStyle="double"
         borderColor="cyan"
         paddingX={1}
-        marginTop={1}
+        marginTop={activity ? 0 : 1}
       >
         <Box marginRight={1}>
           <Text bold color="cyan">❯</Text>
