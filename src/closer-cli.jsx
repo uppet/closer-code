@@ -123,9 +123,7 @@ function App() {
   const [currentPlan, setCurrentPlan] = useState(null);
   const [toolExecutions, setToolExecutions] = useState([]);
   const [status, setStatus] = useState('Initializing...');
-
-  const messagesRef = useRef([]);
-  messagesRef.current = messages;
+  const [messageCounter, setMessageCounter] = useState(0);
 
   // 初始化
   useEffect(() => {
@@ -194,19 +192,21 @@ Type your message or command to get started.`
               const lastMsg = prev[prev.length - 1];
 
               if (lastMsg && lastMsg.role === 'assistant' && !lastMsg.complete) {
-                // ✅ 创建新对象，不直接修改
+                // 更新 key 强制重新渲染
                 return [
                   ...prev.slice(0, -1),
                   {
                     ...lastMsg,
-                    content: lastMsg.content + progress.content
+                    content: lastMsg.content + progress.content,
+                    key: Date.now() // 每次更新都改变 key
                   }
                 ];
               } else {
                 return [...prev, {
                   role: 'assistant',
                   content: progress.content,
-                  complete: false
+                  complete: false,
+                  key: Date.now()
                 }];
               }
             });
@@ -236,7 +236,8 @@ Type your message or command to get started.`
               role: 'assistant',
               content: response.content,
               complete: true,
-              toolCalls: response.toolCalls
+              toolCalls: response.toolCalls,
+              key: Date.now()
             }
           ];
         } else {
@@ -244,7 +245,8 @@ Type your message or command to get started.`
             role: 'assistant',
             content: response.content,
             complete: true,
-            toolCalls: response.toolCalls
+            toolCalls: response.toolCalls,
+            key: Date.now()
           }];
         }
       });
@@ -252,7 +254,8 @@ Type your message or command to get started.`
     } catch (error) {
       setMessages(prev => [...prev, {
         role: 'error',
-        content: `Error: ${error.message}`
+        content: `Error: ${error.message}`,
+        key: Date.now()
       }]);
     } finally {
       setIsProcessing(false);
@@ -370,7 +373,7 @@ Type your message or command to get started.`
             <Box flexGrow={1} flexDirection="column" overflow="hidden">
               <Static items={messages}>
                 {(message, index) => (
-                  <MessageItem key={index} message={message} />
+                  <MessageItem key={message.key || index} message={message} />
                 )}
               </Static>
             </Box>
