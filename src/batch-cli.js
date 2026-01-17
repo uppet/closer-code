@@ -309,5 +309,19 @@ async function runBatch() {
   }
 }
 
-// 运行批处理模式
-runBatch();
+// 导出运行函数，供 cloco 命令使用
+export { runBatch };
+
+// 只在直接运行时执行
+// 检查当前模块是否是主入口模块
+const modulePath = new URL(import.meta.url).pathname;
+const argvPath = process.argv[1];
+// 在 Windows 和 Unix 系统上都能正常工作的路径比较
+const isMainModule = argvPath === modulePath ||
+                      argvPath === modulePath.replace(/^\//, '') ||
+                      argvPath.endsWith('batch-cli.js') ||
+                      argvPath.endsWith('batch-cli');
+
+if (isMainModule) {
+  runBatch();
+}

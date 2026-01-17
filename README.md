@@ -9,12 +9,19 @@ Closer Code 是一个强大的命令行 AI 编程助理，可以帮助开发者�
 - 🔍 搜索和理解代码库
 - ⚡ 运行测试和命令
 
+**命令**: `cloco` (closer + code)
+
 ## 功能特性
 
 ### 对话式交互
 - 自然语言交互，无需记忆复杂命令
 - 上下文感知的对话历史
 - 支持流式响应
+
+### 批处理模式 🚀
+- 非交互式命令执行
+- 支持脚本集成和 CI/CD
+- 多种输出格式（text/json/verbose）
 
 ### 任务规划与执行
 - 自动将复杂任务分解为可执行步骤
@@ -62,12 +69,32 @@ Closer Code 是一个强大的命令行 AI 编程助理，可以帮助开发者�
 - Node.js >= 18.0.0
 - npm 或 yarn
 
-### 安装步骤
+### 全局安装
 
 ```bash
 # 克隆仓库
 git clone <repository-url>
-cd spawnbash
+cd closer-code
+
+# 安装依赖
+npm install
+
+# 构建项目
+npm run build
+
+# 全局安装
+npm install -g .
+
+# 使用命令
+cloco
+```
+
+### 本地开发
+
+```bash
+# 克隆仓库
+git clone <repository-url>
+cd closer-code
 
 # 安装依赖
 npm install
@@ -77,6 +104,8 @@ npm run build
 
 # 启动应用
 npm start
+# 或直接运行
+node dist/index.js
 ```
 
 ## 配置
@@ -139,11 +168,66 @@ ollama serve
 
 ## 使用方法
 
-### 启动
+### 命令概览
 
 ```bash
-npm start
+# 交互模式（默认）
+cloco                              # 首次使用会自动运行配置向导
+
+# 批处理模式
+cloco -b "分析代码"                 # 短选项
+cloco --batch "列出文件"            # 长选项
+cloco -b --json "生成代码" > out.js # JSON 格式输出
+cloco -b --file prompt.txt         # 从文件读取提示词
+
+# 配置管理
+cloco config                       # 查看当前配置
+cloco config set <key> <value>     # 设置配置项
+cloco config edit                  # 打开配置文件编辑器
+
+# 其他命令
+cloco setup                        # 手动运行配置向导
+cloco upgrade                      # 检查版本更新
+cloco version                      # 显示版本信息
+cloco help                         # 显示帮助
 ```
+
+### 交互模式
+
+启动交互式对话：
+
+```bash
+cloco
+```
+
+首次使用会自动运行配置向导。
+
+### 批处理模式
+
+批处理模式适用于自动化脚本和 CI/CD 集成：
+
+```bash
+# 基本使用
+cloco -b "解释这个函数"
+
+# JSON 输出（便于脚本处理）
+cloco -b --json "生成代码" > output.json
+
+# 详细输出（包含工具调用过程）
+cloco -b --verbose "分析项目结构"
+
+# 从文件读取提示词
+cloco -b --file prompt.txt
+
+# 标准输入
+echo "列出当前目录的文件" | cloco -b
+```
+
+**输出格式**：
+
+- **text**（默认）：纯文本输出
+- **json**：结构化 JSON，包含工具调用和元数据
+- **verbose**：详细输出，显示工具执行过程
 
 ### 基本对话
 
@@ -348,19 +432,31 @@ AI 认为任务完成当且仅当：
 
 ```
 src/
-├── closer-cli.jsx    # 主 UI 组件
-├── ai-client.js       # AI 客户端（支持多个提供商）
-├── conversation.js    # 对话管理器
-├── planner.js         # 任务规划器
-├── tools.js           # 工具执行器
-├── search.js          # 代码搜索
-├── shortcuts.js       # 快捷操作管理
-├── snippets.js        # 代码片段管理
-├── git-helper.js      # Git 集成
-├── config.js          # 配置管理
-├── setup.js           # 设置向导
-├── test-modules.js    # 测试验证
-└── bash-runner.js     # Bash 执行器
+├── index.js            # 统一 CLI 入口（cloco 命令）
+├── commands/           # 子命令实现
+│   ├── chat.js        # 交互模式
+│   ├── batch.js       # 批处理模式
+│   ├── config.js      # 配置管理
+│   ├── setup.js       # 初始化向导
+│   ├── upgrade.js     # 版本更新检查
+│   └── help.js        # 帮助文档
+├── utils/              # 工具函数
+│   ├── cli.js         # CLI 参数解析
+│   └── version.js     # 版本信息
+├── closer-cli.jsx      # 交互式 UI 组件（保留）
+├── batch-cli.js        # 批处理模式（保留，向后兼容）
+├── ai-client.js        # AI 客户端（支持多个提供商）
+├── conversation.js     # 对话管理器
+├── planner.js          # 任务规划器
+├── tools.js            # 工具执行器
+├── search.js           # 代码搜索
+├── shortcuts.js        # 快捷操作管理
+├── snippets.js         # 代码片段管理
+├── git-helper.js       # Git 集成
+├── config.js           # 配置管理
+├── setup.js            # 设置向导
+├── test-modules.js     # 测试验证
+└── bash-runner.js      # Bash 执行器
 ```
 
 ## 开发
@@ -371,14 +467,27 @@ src/
 # 运行设置向导
 npm run setup
 
-# 启动应用
+# 启动应用（使用 cloco 命令）
 npm start
+
+# 或直接运行
+node dist/index.js
 ```
 
 ### 构建
 
 ```bash
+# 构建所有文件
 npm run build
+
+# 仅构建主入口
+npm run build:main
+
+# 仅构建交互模式
+npm run build:cli
+
+# 仅构建批处理模式
+npm run build:batch
 ```
 
 ### 开发模式（自动重建）
@@ -387,10 +496,14 @@ npm run build
 npm run dev
 ```
 
-### 测试模块
+### 测试
 
 ```bash
+# 测试模块
 npm test
+
+# 测试批处理模式
+npm run test:batch
 ```
 
 ### 检查编译
@@ -398,6 +511,15 @@ npm test
 ```bash
 npm run check
 ```
+
+## 向后兼容
+
+为了平滑过渡，保留了旧的命令：
+
+- `closer` - 等同于 `cloco`（交互模式）
+- `closer-batch` - 等同于 `cloco -b`（批处理模式）
+
+旧命令会显示迁移提示但仍然可用。建议新用户直接使用 `cloco` 命令。
 
 ## 工作原理
 

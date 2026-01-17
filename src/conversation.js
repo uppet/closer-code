@@ -1,7 +1,6 @@
 /**
  * 对话管理器 - 处理与 AI 的交互
  */
-
 import { createAIClient, checkConfig } from './ai-client.js';
 import { ToolExecutor, getToolDefinitions } from './tools.js';
 import { TaskPlanner, ProblemDiagnoser } from './planner.js';
@@ -19,7 +18,6 @@ import {
   logAIResponse,
   logSessionSummary
 } from './logger.js';
-
 // 消息类型
 export const MessageType = {
   USER: 'user',
@@ -28,22 +26,65 @@ export const MessageType = {
   SYSTEM: 'system',
   ERROR: 'error'
 };
-
+// Workflow 测试模式的前置提示词（添加到每轮对话开头）
+export const WORKFLOW_PROMPT_PREFIX = `
+【Workflow 测试模式】
+你现在处于 workflow 测试模式。这个测试分为两轮：
+**第1轮（执行任务）**：
+- 你会收到一个任务描述
+- 你必须使用工具完成任务（如 readFile、writeFile、bash 等）
+- 不能只说"我会做"，而要立即调用工具
+- 必须实际创建/修改文件，而不仅仅是输出代码
+**第2轮（验证结果）**：
+- 你会收到验收标准
+- 使用工具验证结果是否符合预期
+- 验证完成后，如果结果完全符合预期，你必须回复：WORKFLOW TEST AS EXPECTED
+- 如果结果不符合预期，请详细说明哪些方面不符合
+**工具调用格式（必须严格遵守）**：
+- 必须使用：>>>CALL:toolName 换行 {"param":"value"} 换行 <<<
+- 绝对不能使用：<toolName> 或 </toolName> 等格式
+- 所有工具调用都必须遵循这个格式
+重要：你必须使用工具来实际操作文件和系统，而不是仅仅输出代码或描述。
+`;
+// Workflow 测试模式的系统提示词（添加到系统提示中）
+const WORKFLOW_SYSTEM_PROMPT = `
+## Workflow 测试模式
+你当前处于 workflow 测试模式。这是一个两轮对话测试：
+1. **执行任务阶段（第1轮）**：
+   - 你会收到一个任务描述
+   - 必须使用工具完成该任务（readFile、writeFile、bash 等）
+   - 必须实际创建/修改文件，不能只输出代码
+   - 任务完成后对话会中止
+2. **验证阶段（第2轮）**：
+   - 你会收到验收标准
+   - 使用工具验证结果是否符合预期
+   - 验证完成后对话会中止
+**验证结果回复格式**：
+- 如果结果完全符合预期：必须回复 "WORKFLOW TEST AS EXPECTED"
+- 如果结果不符合预期：详细说明哪些方面不符合
+**关键规则**：
+- 第1轮必须使用工具实际操作文件
+- 第2轮验证完成后必须给出明确的验收结论
+`;
 /**
  * 解析 AI 响应中的工具调用
- * 格式: >>>CALL:toolName\n{"param":"value"}\n<<<
+ * 支持多种格式：
+ * 1. >>>CALL:toolName\n{"param":"value"}\n<<<
+ * 2. <toolName\n{"param":"value"}
  */
 function parseToolCalls(text) {
+  console.error(`[parseToolCalls] Input text (first 100 chars):`, text.substring(0, 100));
+  console.error(`[parseToolCalls] Char codes (first 100 chars):`, [...text.substring(0, 100)].map(c => `${c}(${c.charCodeAt(0)})`).join(' '));
   const toolCalls = [];
-  const callPattern = />>>CALL:(\w+)\s*\n([\s\S]*?)<<</g;
-
+  // 格式1: >>>CALL:toolName\n{"param":"value"}\n<<<
+  const callPattern1 = />>>CALL:(\w+)\s*\n([\s\S]*?)<<</g;
   let match;
-  while ((match = callPattern.exec(text)) !== null) {
+  while ((match = callPattern1.exec(text)) !== null) {
     const toolName = match[1];
     const jsonStr = match[2].trim();
-
     try {
       const params = JSON.parse(jsonStr);
+      console.error(`[parseToolCalls] Parsed format1 tool call: ${toolName}`);
       toolCalls.push({
         name: toolName,
         input: params,
@@ -53,27 +94,45 @@ function parseToolCalls(text) {
       console.error(`Failed to parse tool call JSON for ${toolName}:`, e);
     }
   }
-
+  // 格式2: <invoke><toolName<arg_key>paramName</arg_key>paramValue</invoke>
+  // 例如：<invoke><readFile<arg_key>filePath</arg_key>adder.md</invoke>
+const callPattern2 = /<tool_call><(bash|readFile|writeFile|editFile|searchFiles|searchCode)<([^>]+)>" :"([^"]*)"/g;
+  while ((match = callPattern2.exec(text)) !== null) {
+    const toolName = match[1];
+    const paramName = match[2];
+    const paramValue = match[3].trim();
+    try {
+      const params = {};
+      params[paramName] = paramValue;
+      console.error(`[parseToolCalls] Parsed format2 tool call: ${toolName}`);
+      toolCalls.push({
+        name: toolName,
+        input: params,
+        fullMatch: match[0]
+      });
+    } catch (e) {
+      console.error(`Failed to parse tool call JSON for ${toolName}:`, e);
+    }
+  }
+  console.error(`[parseToolCalls] Total tool calls found: ${toolCalls.length}`);
   return toolCalls;
 }
-
 /**
  * 清理响应文本，移除工具调用标记
  */
 function cleanToolCallMarkers(text) {
   if (!text || typeof text !== 'string') return text;
-
   // 移除所有工具调用标记（支持多行 JSON）
   // 格式: >>>CALL:toolName\n{...}\n<<<
   return text.replace(/>>>CALL:\w+\s*\n.*?<<</gs, '').trim();
 }
-
 /**
  * 对话会话
  */
 export class Conversation {
-  constructor(config) {
+  constructor(config, workflowTest = false) {
     this.config = config;
+    this.workflowTest = workflowTest;
     this.messages = [];
     this.toolExecutor = new ToolExecutor(config);
     this.planner = new TaskPlanner(config);
@@ -81,7 +140,6 @@ export class Conversation {
     this.currentPlan = null;
     this.isProcessing = false;
   }
-
   /**
    * 初始化对话
    */
@@ -89,23 +147,18 @@ export class Conversation {
     // 初始化日志
     await initLogger();
     await logConfig(this.config);
-
     // 检查配置
     checkConfig(this.config);
-
     // 加载历史
     const history = loadHistory();
     this.messages = history.map(msg => ({
       role: msg.role,
       content: msg.content
     }));
-
     // 构建系统提示
     this.buildSystemPrompt();
-
     return this;
   }
-
   /**
    * 构建系统提示
    */
@@ -113,79 +166,59 @@ export class Conversation {
     const memory = loadMemory();
     const projectKey = this.config.behavior.workingDir || 'default';
     const projectInfo = memory.projects?.[projectKey];
-
     this.systemPrompt = `You are Closer, an AI programming assistant designed to help developers with coding tasks, debugging, and project management.
-
 ## Tool Call Format (CRITICAL - MUST FOLLOW)
-
 **When you need to call a tool, use this EXACT format:**
-
 \`\`\`
 >>>CALL:toolName
 {"parameter":"value","parameter2":"value2"}
 <<<
 \`\`\`
-
 **Examples:**
-
 Call bash tool:
 \`\`\`
 >>>CALL:bash
 {"command":"ls -la"}
 <<<
 \`\`\`
-
 Call readFile tool:
 \`\`\`
 >>>CALL:readFile
 {"filePath":"src/tools.js"}
 <<<
 \`\`\`
-
 Call writeFile tool:
 \`\`\`
 >>>CALL:writeFile
 {"filePath":"test.txt","content":"Hello World"}
 <<<
-
 OR for binary/special content (base64 encoded):
 \`\`\`
 >>>CALL:writeFile
 {"filePath":"test.txt","contentBase64":"SGVsbG8gV29ybGQ="}
 <<<
 \`\`\`
-
 **IMPORTANT RULES:**
 1. Start each tool call with \`>>>CALL:toolName\` on its own line
 2. Put all parameters as JSON on the next line
 3. End with \`<<<\` on its own line
 4. DO NOT use XML tags like <readFile> or </invoke>
 5. DO NOT mix tool calls with your text response
-
 This format prevents parsing errors when filenames contain special characters like \`<\`, \`>\`, \`/\`, etc.
-
 ## Tool Use Requirements (CRITICAL)
-
 **YOU MUST USE TOOLS TO EXECUTE ACTIONS.** This is not optional.
-
 - When user asks you to "show", "list", "check", "see", "view" directory contents → **MUST** call bash tool with "ls" or "dir" command
 - When user asks about files → **MUST** call readFile, searchFiles, or searchCode tools
 - When user asks to run commands/tests → **MUST** call bash tool
 - When user asks to make changes → **MUST** call writeFile or editFile tools
-
 **DO NOT** just say "I'll check", "Let me see", "I'll look into it" - **IMMEDIATELY CALL THE APPROPRIATE TOOL**.
-
 Examples of CORRECT behavior:
 - User: "What's in this directory?" → You: Immediately call bash tool using the format above
 - User: "Show me the config" → You: Immediately call readFile tool using the format above
 - User: "Run the tests" → You: Immediately call bash tool using the format above
-
 ## Multi-Step Task Execution Guide
-
 When users request complex tasks that require multiple tool calls, you MUST complete ALL steps before providing a summary.
-
 ### Task: "Read the entire project" / "Analyze the whole project" / "Read all the code"
-
 **Required Steps (Do ALL of them):**
 1. List the src/ directory to see all source files
 2. Read README.md, package.json, and config files to understand the project
@@ -198,23 +231,18 @@ When users request complex tasks that require multiple tool calls, you MUST comp
    - Code quality assessment
    - Performance concerns
    - Design issues or improvements
-
 **Completion Criteria:**
 - ✅ All source files have been read (not just 1-2 files)
 - ✅ Architecture has been analyzed
 - ✅ Specific issues have been identified
 - ❌ DO NOT stop after reading only README or only 1-2 source files
-
 ### Task: "Search for X in the codebase"
-
 **Required Steps:**
 1. Use searchFiles to find relevant files
 2. Use searchCode to search within file contents
 3. Read the matching files to understand context
 4. Provide specific findings with file names and line numbers
-
 ### Task: "Fix the bug" / "Debug this"
-
 **Required Steps:**
 1. Analyze error messages or stack traces
 2. Search for related code
@@ -222,9 +250,7 @@ When users request complex tasks that require multiple tool calls, you MUST comp
 4. Identify the root cause
 5. Propose a specific fix
 6. If user approves, implement the fix using editFile or writeFile
-
 ## Your Capabilities
-
 You have access to tools that allow you to:
 - **bash**: Execute bash commands (ls, cat, grep, npm, git, etc.)
 - **readFile**: Read file contents
@@ -232,53 +258,40 @@ You have access to tools that allow you to:
 - **editFile**: Replace text in files
 - **searchFiles**: Find files by pattern
 - **searchCode**: Search within file contents
-
 ## Tool Usage Strategy
-
 ### When to Use Multiple Tools
 - **Sequential**: Some tasks require tool A's output to inform tool B
 - **Parallel**: When independent, multiple tools can be called together
 - **Iterative**: Continue using tools until the task is COMPLETE
-
 ### Completion Standards
 - A task is ONLY complete when you have:
   1. Gathered ALL necessary information
   2. Analyzed the data thoroughly
   3. Provided actionable insights or results
   4. Answered the user's specific question
-
 **Stop saying "Let me check" and START calling tools immediately.**
-
 ## Your Approach
-
 1. **ALWAYS Use Tools**: When user requests an action, IMMEDIATELY call the appropriate tool
 2. **Explain Briefly**: Give a 1-2 sentence explanation before calling the tool
 3. **Be Thorough**: For multi-step tasks, complete ALL steps before summarizing
 4. **Verify Results**: Check tool outputs and confirm success
 5. **Iterate**: Continue using tools until the task is COMPLETE
 6. **Learn Patterns**: Adapt to the project's existing style
-
 ## Current Context
-
 Working Directory: ${this.config.behavior.workingDir}
 Available Tools: ${this.config.tools.enabled.join(', ')}
-
 ${projectInfo ? `
 ## Project Patterns
-
 This is a familiar project. Remember these patterns:
 ${JSON.stringify(projectInfo.patterns, null, 2)}
 ` : ''}
-
 ## Behavior Configuration
-
 - Auto Plan: ${this.config.behavior.autoPlan ? 'Enabled' : 'Disabled'}
 - Auto Execute: ${this.config.behavior.autoExecute ? 'Enabled (low-risk operations only)' : 'Disabled'}
 - Confirm Destructive: ${this.config.behavior.confirmDestructive ? 'Enabled' : 'Disabled'}
-
-**Remember: Use tools proactively. Complete ALL steps of multi-step tasks before reporting results.**`;
+**Remember: Use tools proactively. Complete ALL steps of multi-step tasks before reporting results.**`
++ (this.workflowTest ? WORKFLOW_SYSTEM_PROMPT : '');
   }
-
   /**
    * 发送消息并获取响应
    */
@@ -286,50 +299,39 @@ ${JSON.stringify(projectInfo.patterns, null, 2)}
     if (this.isProcessing) {
       throw new Error('Already processing a message');
     }
-
     this.isProcessing = true;
-
     try {
       // 记录用户消息
       await logUserMessage(userMessage);
-
       // 添加用户消息
       this.messages.push({
         role: MessageType.USER,
         content: userMessage
       });
-
       // 获取 AI 客户端
       const aiClient = createAIClient(this.config);
       const tools = getToolDefinitions(this.config.tools.enabled);
-
       const requestOptions = {
         system: this.systemPrompt,
-        tools: tools,
+        tools: this.workflowTest ? [] : tools,  // workflow 测试模式不传递工具定义，强制使用文本格式
         temperature: 0.7
       };
-
       // 记录 AI 请求
       await logAIRequest(this.messages, requestOptions);
-
       // 流式响应处理
       let fullResponse = '';
       let toolCalls = [];
-
       await logStreamStart();
-
       await aiClient.chatStream(
         this.messages,
         requestOptions,
         (chunk) => {
           // 记录流式响应块
           logStreamChunk(chunk);
-
           // 处理流式响应块
           if (chunk.type === 'content_block_delta' && chunk.delta?.text) {
             const text = chunk.delta.text;
             fullResponse += text;
-
             // 实时清理工具调用标记，只显示纯文本给用户
             if (onProgress) {
               // 注意：流式输出时无法完整清理（可能只收到部分标记）
@@ -362,10 +364,8 @@ ${JSON.stringify(projectInfo.patterns, null, 2)}
           }
         }
       );
-
       // 记录流式响应结束
       await logStreamEnd(fullResponse, toolCalls);
-
       // 解析工具调用的 JSON 输入
       for (const toolCall of toolCalls) {
         if (typeof toolCall.input === 'string') {
@@ -376,19 +376,15 @@ ${JSON.stringify(projectInfo.patterns, null, 2)}
           }
         }
       }
-
       // 额外解析文本中的工具调用标记（格式: >>>CALL:toolName\nJSON\n<<<）
       const textToolCalls = parseToolCalls(fullResponse);
-
       // 合并 API 工具调用和文本工具调用
       if (textToolCalls.length > 0) {
         console.log(`Found ${textToolCalls.length} tool calls in text response`);
         toolCalls = [...toolCalls, ...textToolCalls];
       }
-
       // 清理响应文本，移除工具调用标记
       const cleanedResponse = cleanToolCallMarkers(fullResponse);
-
       // 如果有工具调用，执行它们
       if (toolCalls.length > 0) {
         for (const toolCall of toolCalls) {
@@ -399,25 +395,20 @@ ${JSON.stringify(projectInfo.patterns, null, 2)}
               input: toolCall.input
             });
           }
-
           const result = await this.toolExecutor.execute(toolCall.name, toolCall.input);
-
           // 记录工具调用
           await logToolCall(toolCall.name, toolCall.input, result);
-
           // 添加工具结果到消息历史
           this.messages.push({
             role: MessageType.ASSISTANT,
             content: cleanedResponse,
             toolCalls: toolCalls
           });
-
           this.messages.push({
             role: MessageType.TOOL,
             toolUseId: toolCall.id,
             content: JSON.stringify(result)
           });
-
           if (onProgress) {
             onProgress({
               type: 'tool_complete',
@@ -426,31 +417,23 @@ ${JSON.stringify(projectInfo.patterns, null, 2)}
             });
           }
         }
-
         // 记录第二次 AI 请求
         await logAIRequest(this.messages, { system: this.systemPrompt });
-
         // 获取 AI 对工具结果的响应
         const followUp = await aiClient.chat(this.messages, {
           system: this.systemPrompt
         });
-
         // 记录 AI 响应
         await logAIResponse(followUp);
-
         const followUpText = followUp.content.find(c => c.type === 'text')?.text || '';
-
         // 解析 follow-up 中的文本工具调用（格式: >>>CALL:toolName\nJSON\n<<<）
         const followUpToolCalls = parseToolCalls(followUpText);
-
         // 清理 follow-up 文本，移除工具调用标记
         const cleanedFollowUp = cleanToolCallMarkers(followUpText);
-
         // 如果有工具调用，执行它们
         let finalFollowUp = cleanedFollowUp;
         if (followUpToolCalls.length > 0) {
           console.log(`Found ${followUpToolCalls.length} tool calls in follow-up response`);
-
           for (const toolCall of followUpToolCalls) {
             if (onProgress) {
               onProgress({
@@ -459,19 +442,15 @@ ${JSON.stringify(projectInfo.patterns, null, 2)}
                 input: toolCall.input
               });
             }
-
             const result = await this.toolExecutor.execute(toolCall.name, toolCall.input);
-
             // 记录工具调用
             await logToolCall(toolCall.name, toolCall.input, result);
-
             // 添加工具结果到消息历史
             this.messages.push({
               role: MessageType.TOOL,
               toolUseId: toolCall.id,
               content: JSON.stringify(result)
             });
-
             if (onProgress) {
               onProgress({
                 type: 'tool_complete',
@@ -481,36 +460,29 @@ ${JSON.stringify(projectInfo.patterns, null, 2)}
             }
           }
         }
-
         this.messages.push({
           role: MessageType.ASSISTANT,
           content: cleanedFollowUp
         });
-
         // 保存历史
         saveHistory(this.messages);
-
         return {
           content: cleanedResponse + '\n\n' + finalFollowUp,
           toolCalls: toolCalls.map(t => t.name),
           followUp: finalFollowUp
         };
       }
-
       // 保存助手响应
       this.messages.push({
         role: MessageType.ASSISTANT,
         content: cleanedResponse
       });
-
       // 保存历史
       saveHistory(this.messages);
-
       return {
         content: cleanedResponse,
         toolCalls: []
       };
-
     } catch (error) {
       await logAIError(error);
       throw error;
@@ -518,7 +490,6 @@ ${JSON.stringify(projectInfo.patterns, null, 2)}
       this.isProcessing = false;
     }
   }
-
   /**
    * 规划并执行任务
    */
@@ -526,59 +497,47 @@ ${JSON.stringify(projectInfo.patterns, null, 2)}
     if (onProgress) {
       onProgress({ type: 'planning_start', task });
     }
-
     // 创建计划
     const plan = await this.planner.planTask(task, {
       workingDir: this.config.behavior.workingDir
     });
-
     if (onProgress) {
       onProgress({ type: 'plan_created', plan });
     }
-
     this.currentPlan = plan;
-
     // 执行计划
     const result = await this.planner.executePlan(plan, (event) => {
       if (onProgress) {
         onProgress({ type: 'execution_progress', event });
       }
     });
-
     return result;
   }
-
   /**
    * 诊断错误
    */
   async diagnoseError(error, context = {}) {
     const diagnosis = await this.diagnoser.diagnose(error, context);
-
     // 添加到对话
     this.messages.push({
       role: MessageType.SYSTEM,
       content: `Error Diagnosis:\n${diagnosis}`
     });
-
     return diagnosis;
   }
-
   /**
    * 学习项目模式
    */
   async learnProject() {
     const patterns = await this.planner.learnFromProject();
-
     if (patterns) {
       this.messages.push({
         role: MessageType.SYSTEM,
         content: `Learned project patterns:\n${JSON.stringify(patterns, null, 2)}`
       });
     }
-
     return patterns;
   }
-
   /**
    * 清除对话历史
    */
@@ -586,7 +545,6 @@ ${JSON.stringify(projectInfo.patterns, null, 2)}
     this.messages = [];
     saveHistory([]);
   }
-
   /**
    * 获取对话摘要
    */
@@ -598,7 +556,6 @@ ${JSON.stringify(projectInfo.patterns, null, 2)}
       lastMessage: this.messages[this.messages.length - 1]
     };
   }
-
   /**
    * 导出对话
    */
@@ -609,7 +566,6 @@ ${JSON.stringify(projectInfo.patterns, null, 2)}
       summary: this.getSummary()
     };
   }
-
   /**
    * 导入对话
    */
@@ -619,12 +575,13 @@ ${JSON.stringify(projectInfo.patterns, null, 2)}
     saveHistory(this.messages);
   }
 }
-
 /**
  * 创建对话会话
+ * @param {Object} config - 配置对象
+ * @param {boolean} workflowTest - 是否为 workflow 测试模式
  */
-export async function createConversation(config) {
-  const conversation = new Conversation(config);
+export async function createConversation(config, workflowTest = false) {
+  const conversation = new Conversation(config, workflowTest);
   await conversation.initialize();
   return conversation;
 }

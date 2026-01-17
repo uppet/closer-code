@@ -79,6 +79,24 @@ export function loadConfig() {
   return DEFAULT_CONFIG;
 }
 
+// 检查配置是否存在且有效
+export function hasConfig() {
+  try {
+    if (!fs.existsSync(CONFIG_FILE)) {
+      return false;
+    }
+    const config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
+
+    // 检查是否有有效的 API Key
+    const provider = config.ai?.provider || 'anthropic';
+    const apiKey = config.ai?.[provider]?.apiKey;
+
+    return !!apiKey;
+  } catch (error) {
+    return false;
+  }
+}
+
 // 保存配置
 export function saveConfig(config) {
   try {
