@@ -105,18 +105,29 @@ export class Conversation {
         content: msg.content
       }));
 
-    // 构建系统提示
-    this.buildSystemPrompt();
+    // 构建系统提示（现在是异步的）
+    await this.buildSystemPrompt();
     return this;
   }
 
   /**
    * 构建系统提示
    */
-  buildSystemPrompt() {
+  async buildSystemPrompt() {
     const memory = loadMemory();
     const projectKey = this.config.behavior.workingDir || 'default';
     const projectInfo = memory.projects?.[projectKey];
+
+    // 读取 cloco.md 文件内容
+    let clocoContent = '';
+    try {
+      const fs = await import('fs/promises');
+      const path = await import('path');
+      const clocoPath = path.join(process.cwd(), 'cloco.md');
+      clocoContent = await fs.readFile(clocoPath, 'utf-8');
+    } catch (error) {
+      console.error('Failed to read cloco.md:', error.message);
+    }
 
     // SDK 版本的系统提示 - 移除了工具调用格式的说明
     // SDK 会自动处理工具调用，无需告诉 AI 特殊格式
@@ -135,6 +146,24 @@ Examples of CORRECT behavior:
 - User: "What's in this directory?" → You: Immediately call bash tool
 - User: "Show me the config" → You: Immediately call readFile tool
 - User: "Run the tests" → You: Immediately call bash tool
+
+## Planning and Documentation Behavior (CRITICAL)
+**YOU MUST DOCUMENT YOUR PLANNING PROCESS.** When analyzing complex tasks or projects:
+1. **Save planning documents to .closer_plan directory**
+   - Copy relevant .md files that inform your understanding
+   - Document your analysis process and findings
+   - Keep track of context files you've reviewed
+2. **Why this matters:**
+   - Creates a traceable record of your thought process
+   - Helps maintain context across sessions
+   - Enables better project understanding over time
+3. **When to do this:**
+   - Before starting complex multi-step tasks
+   - When analyzing project architecture
+   - When reviewing documentation for context
+   - Before making significant changes
+
+**DO NOT** skip this step for complex tasks. It's essential for maintaining project intelligence.
 
 ## Multi-Step Task Execution Guide
 When users request complex tasks that require multiple tool calls, you MUST complete ALL steps before providing a summary.
@@ -183,7 +212,14 @@ ${JSON.stringify(projectInfo.patterns, null, 2)}
 - Auto Execute: ${this.config.behavior.autoExecute ? 'Enabled (low-risk operations only)' : 'Disabled'}
 - Confirm Destructive: ${this.config.behavior.confirmDestructive ? 'Enabled' : 'Disabled'}
 
-**Remember: Use tools proactively. Complete ALL steps of multi-step tasks before reporting results.**`
+**Remember: Use tools proactively. Complete ALL steps of multi-step tasks before reporting results.**
+
+## 📋 Project Behavior Guidelines (CRITICAL)
+**The following guidelines from cloco.md are EXTREMELY IMPORTANT and MUST be followed, . No matter they were written in any language:**
+
+${clocoContent || 'No project-specific guidelines available.'}
+
+**These guidelines take precedence over general instructions. Follow them carefully**`
 + (this.workflowTest ? WORKFLOW_SYSTEM_PROMPT : '');
   }
 

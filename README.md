@@ -23,6 +23,15 @@ Closer Code 是一个强大的命令行 AI 编程助理，可以帮助开发者�
 - ✅ 内置错误处理和重试
 - ✅ 实时进度显示
 
+### 项目历史隔离 🆕
+- ✅ 每个项目拥有独立的对话历史
+- ✅ 基于项目路径自动隔离上下文
+- ✅ 避免不同项目之间的上下文混淆
+- ✅ 历史管理命令行工具
+- ✅ 完整的测试覆盖
+
+查看 [项目历史隔离文档](./docs/PROJECT_HISTORY_ISOLATION.md) 了解详情。
+
 ### 移除的复杂性
 - ❌ 无需手工 SSE 解析
 - ❌ 无需正则表达式解析工具调用
@@ -308,6 +317,22 @@ echo "列出当前目录的文件" | cloco -b
 ❯ 切换到 develop 分支
 ❯ 显示最近 5 次提交
 ❯ 智能提交当前更改
+```
+
+### 项目历史管理
+
+```
+❯ 列出所有项目的历史
+node src/commands/history.js list
+
+❯ 查看当前项目的历史
+node src/commands/history.js show $(pwd)
+
+❯ 清除项目历史
+node src/commands/history.js clear $(pwd)
+
+❯ 导出项目历史
+node src/commands/history.js export $(pwd)
 ```
 
 ### 任务规划示例

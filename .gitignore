@@ -20,3 +20,6 @@ Thumbs.db
 
 # Claude
 .claude/
+
+# Closer Plan (AI planning and analysis documents)
+.closer_plan/
