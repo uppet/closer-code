@@ -144,8 +144,8 @@ export async function runWorkflow(workflowPath, args, options) {
     try {
       console.log(`\n📤 发送消息到 AI...`);
 
-      response = await conversation.sendMessage(userMessage, {
-        onProgress: (event) => handleProgress(event, options)
+      response = await conversation.sendMessage(userMessage, (event) => {
+        handleProgress(event, options);
       });
 
       // 显示 AI 响应摘要

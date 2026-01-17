@@ -1,393 +1,267 @@
 /**
- * 工具执行引擎 - AI 可用的所有工具
+ * 工具执行引擎（使用 SDK）
+ *
+ * 使用 @anthropic-ai/sdk 的 betaZodTool 和 Zod 来定义工具
+ * 优势：
+ * - 类型安全的工具定义
+ * - 自动 schema 验证
+ * - SDK 自动处理工具调用循环（toolRunner）
+ * - 无需手工解析工具调用
  */
 
+import { z } from 'zod';
+import { betaZodTool } from '@anthropic-ai/sdk/helpers/beta/zod';
 import fs from 'fs/promises';
 import path from 'path';
-import { spawn } from 'child_process';
 import { executeBashCommand } from './bash-runner.js';
 import { glob } from 'glob';
 
-// 工具执行结果
-export class ToolResult {
-  constructor(success, data, error = null) {
-    this.success = success;
-    this.data = data;
-    this.error = error;
-    this.timestamp = new Date().toISOString();
-  }
+/**
+ * 创建一个配置上下文，用于工具执行器
+ */
+let toolExecutorContext = null;
+
+export function setToolExecutorContext(config) {
+  toolExecutorContext = {
+    workingDir: config.behavior.workingDir,
+    enabledTools: new Set(config.tools.enabled)
+  };
 }
 
-// 工具定义
-export const TOOLS = {
-  // 执行 bash 命令
-  bash: {
-    name: 'bash',
-    description: 'Execute a bash shell command. Use this IMMEDIATELY when user asks to: list/show directory contents (ls, dir), run commands, execute tests, check file info, run git commands, or ANY terminal operation. DO NOT just say "I will check" - CALL THIS TOOL.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        command: {
-          type: 'string',
-          description: 'The bash command to execute (e.g., "ls -la", "cat file.txt", "npm test", "git status")'
-        },
-        timeout: {
-          type: 'number',
-          description: 'Timeout in milliseconds (default: 30000)',
-          default: 30000
-        }
-      },
-      required: ['command']
-    }
-  },
-
-  // 读取文件
-  readFile: {
-    name: 'readFile',
-    description: 'Read the contents of a file',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        filePath: {
-          type: 'string',
-          description: 'Absolute or relative path to the file'
-        },
-        encoding: {
-          type: 'string',
-          description: 'File encoding (default: utf-8)',
-          default: 'utf-8'
-        }
-      },
-      required: ['filePath']
-    }
-  },
-
-  // 写入文件
-  writeFile: {
-    name: 'writeFile',
-    description: 'Write content to a file (creates or overwrites). Supports both plain text content and base64-encoded content.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        filePath: {
-          type: 'string',
-          description: 'Absolute or relative path to the file'
-        },
-        content: {
-          type: 'string',
-          description: 'Content to write to the file (plain text)'
-        },
-        contentBase64: {
-          type: 'string',
-          description: 'Content to write to the file (base64 encoded, use this for binary data or special characters)'
-        },
-        encoding: {
-          type: 'string',
-          description: 'File encoding (default: utf-8)',
-          default: 'utf-8'
-        }
-      },
-      required: ['filePath']
-    }
-  },
-
-  // 编辑文件（替换）
-  editFile: {
-    name: 'editFile',
-    description: 'Edit a file by replacing exact string matches',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        filePath: {
-          type: 'string',
-          description: 'Path to the file to edit'
-        },
-        oldText: {
-          type: 'string',
-          description: 'Exact text to replace (must be unique in the file)'
-        },
-        newText: {
-          type: 'string',
-          description: 'New text to replace with'
-        },
-        replaceAll: {
-          type: 'boolean',
-          description: 'Replace all occurrences (default: false)',
-          default: false
-        }
-      },
-      required: ['filePath', 'oldText', 'newText']
-    }
-  },
-
-  // 搜索文件
-  searchFiles: {
-    name: 'searchFiles',
-    description: 'Search for files by name pattern',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        pattern: {
-          type: 'string',
-          description: 'Glob pattern (e.g., "**/*.js", "src/**/*.ts")'
-        },
-        cwd: {
-          type: 'string',
-          description: 'Working directory (default: current directory)'
-        }
-      },
-      required: ['pattern']
-    }
-  },
-
-  // 搜索代码内容
-  searchCode: {
-    name: 'searchCode',
-    description: 'Search for text/patterns in file contents',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        pattern: {
-          type: 'string',
-          description: 'Regex pattern to search for'
-        },
-        path: {
-          type: 'string',
-          description: 'Directory to search in (default: current directory)'
-        },
-        fileType: {
-          type: 'string',
-          description: 'Filter by file type (e.g., "js", "py")'
-        }
-      },
-      required: ['pattern']
-    }
-  },
-
-  // 列出目录
-  listFiles: {
-    name: 'listFiles',
-    description: 'List files and directories in a path',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        dirPath: {
-          type: 'string',
-          description: 'Directory path (default: current directory)'
-        },
-        recursive: {
-          type: 'boolean',
-          description: 'List recursively (default: false)',
-          default: false
-        },
-        showHidden: {
-          type: 'boolean',
-          description: 'Show hidden files (default: false)',
-          default: false
-        }
-      }
-    }
-  },
-
-  // 分析错误
-  analyzeError: {
-    name: 'analyzeError',
-    description: 'Analyze an error message and suggest solutions',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        error: {
-          type: 'string',
-          description: 'Error message or stack trace'
-        },
-        context: {
-          type: 'string',
-          description: 'Additional context about what was happening'
-        }
-      },
-      required: ['error']
-    }
-  },
-
-  // 运行测试
-  runTests: {
-    name: 'runTests',
-    description: 'Run tests for the project',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        testCommand: {
-          type: 'string',
-          description: 'Test command to run (default: auto-detect)'
-        },
-        filter: {
-          type: 'string',
-          description: 'Filter tests (e.g., test name pattern)'
-        }
-      }
-    }
-  },
-
-  // 规划任务
-  planTask: {
-    name: 'planTask',
-    description: 'Create a detailed plan for a complex task',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        task: {
-          type: 'string',
-          description: 'Description of the task to plan'
-        },
-        context: {
-          type: 'string',
-          description: 'Additional context about the project'
-        }
-      },
-      required: ['task']
-    }
-  }
-};
-
-// 工具执行器
-export class ToolExecutor {
-  constructor(config) {
-    this.config = config;
-    this.workingDir = config.behavior.workingDir;
-    this.enabledTools = new Set(config.tools.enabled);
-  }
-
-  // 检查工具是否可用
-  isToolEnabled(toolName) {
-    return this.enabledTools.has(toolName);
-  }
-
-  // 执行工具
-  async execute(toolName, input) {
-    if (!this.isToolEnabled(toolName)) {
-      return new ToolResult(false, null, `Tool '${toolName}' is not enabled`);
+/**
+ * Bash 工具 - 执行 bash 命令
+ */
+export const bashTool = betaZodTool({
+  name: 'bash',
+  description: 'Execute a bash shell command. Use this IMMEDIATELY when user asks to: list/show directory contents (ls, dir), run commands, execute tests, check file info, run git commands, or ANY terminal operation. DO NOT just say "I will check" - CALL THIS TOOL.',
+  inputSchema: z.object({
+    command: z.string().describe('The bash command to execute (e.g., "ls -la", "cat file.txt", "npm test", "git status")'),
+    timeout: z.number().optional().describe('Timeout in milliseconds (default: 30000)')
+  }),
+  run: async (input) => {
+    if (!toolExecutorContext) {
+      throw new Error('Tool executor context not initialized');
     }
 
-    try {
-      switch (toolName) {
-        case 'bash':
-          return await this.bash(input);
-        case 'readFile':
-          return await this.readFile(input);
-        case 'writeFile':
-          return await this.writeFile(input);
-        case 'editFile':
-          return await this.editFile(input);
-        case 'searchFiles':
-          return await this.searchFiles(input);
-        case 'searchCode':
-          return await this.searchCode(input);
-        case 'listFiles':
-          return await this.listFiles(input);
-        case 'analyzeError':
-          return await this.analyzeError(input);
-        case 'runTests':
-          return await this.runTests(input);
-        case 'planTask':
-          return await this.planTask(input);
-        default:
-          return new ToolResult(false, null, `Unknown tool: ${toolName}`);
-      }
-    } catch (error) {
-      return new ToolResult(false, null, error.message);
-    }
-  }
-
-  // 执行 bash 命令
-  async bash({ command, timeout = 30000 }) {
-    const result = await executeBashCommand(command, {
-      cwd: this.workingDir,
-      timeout
+    const result = await executeBashCommand(input.command, {
+      cwd: toolExecutorContext.workingDir,
+      timeout: input.timeout || 30000
     });
-    return new ToolResult(
-      result.success,
-      {
+
+    if (result.success) {
+      return JSON.stringify({
+        success: true,
         stdout: result.stdout,
         stderr: result.stderr,
         exitCode: result.exitCode
-      },
-      result.error
-    );
+      });
+    } else {
+      return JSON.stringify({
+        success: false,
+        error: result.error,
+        stdout: result.stdout,
+        stderr: result.stderr
+      });
+    }
   }
+});
 
-  // 读取文件
-  async readFile({ filePath, encoding = 'utf-8' }) {
-    const fullPath = path.resolve(this.workingDir, filePath);
-    const content = await fs.readFile(fullPath, encoding);
-    return new ToolResult(true, { content, path: fullPath });
+/**
+ * 读取文件工具
+ */
+export const readFileTool = betaZodTool({
+  name: 'readFile',
+  description: 'Read the contents of a file',
+  inputSchema: z.object({
+    filePath: z.string().describe('Absolute or relative path to the file'),
+    encoding: z.string().optional().describe('File encoding (default: utf-8)')
+  }),
+  run: async (input) => {
+    if (!toolExecutorContext) {
+      throw new Error('Tool executor context not initialized');
+    }
+
+    const fullPath = path.resolve(toolExecutorContext.workingDir, input.filePath);
+    const content = await fs.readFile(fullPath, input.encoding || 'utf-8');
+
+    return JSON.stringify({
+      success: true,
+      content,
+      path: fullPath
+    });
   }
+});
 
-  // 写入文件
-  async writeFile({ filePath, content, contentBase64, encoding = 'utf-8' }) {
-    const fullPath = path.resolve(this.workingDir, filePath);
+/**
+ * 写入文件工具
+ */
+export const writeFileTool = betaZodTool({
+  name: 'writeFile',
+  description: 'Write content to a file (creates or overwrites). Supports both plain text content and base64-encoded content.',
+  inputSchema: z.object({
+    filePath: z.string().describe('Absolute or relative path to the file'),
+    content: z.string().optional().describe('Content to write to the file (plain text)'),
+    contentBase64: z.string().optional().describe('Content to write to the file (base64 encoded, use this for binary data or special characters)'),
+    encoding: z.string().optional().describe('File encoding (default: utf-8)')
+  }),
+  run: async (input) => {
+    if (!toolExecutorContext) {
+      throw new Error('Tool executor context not initialized');
+    }
+
+    const fullPath = path.resolve(toolExecutorContext.workingDir, input.filePath);
 
     // 优先使用 contentBase64，否则使用 content
     let dataToWrite;
-    if (contentBase64) {
-      // 解码 base64
-      dataToWrite = Buffer.from(contentBase64, 'base64');
-    } else if (content !== undefined) {
-      dataToWrite = content;
+    if (input.contentBase64) {
+      dataToWrite = Buffer.from(input.contentBase64, 'base64');
+    } else if (input.content !== undefined) {
+      dataToWrite = input.content;
     } else {
-      return new ToolResult(false, null, 'Either content or contentBase64 must be provided');
+      return JSON.stringify({
+        success: false,
+        error: 'Either content or contentBase64 must be provided'
+      });
     }
 
-    await fs.writeFile(fullPath, dataToWrite, encoding);
-    return new ToolResult(true, {
+    await fs.writeFile(fullPath, dataToWrite, input.encoding || 'utf-8');
+
+    return JSON.stringify({
+      success: true,
       path: fullPath,
       size: dataToWrite.length,
-      encoding: contentBase64 ? 'base64' : encoding
+      encoding: input.contentBase64 ? 'base64' : (input.encoding || 'utf-8')
     });
   }
+});
 
-  // 编辑文件
-  async editFile({ filePath, oldText, newText, replaceAll = false }) {
-    const fullPath = path.resolve(this.workingDir, filePath);
+/**
+ * 编辑文件工具（替换文本）
+ */
+export const editFileTool = betaZodTool({
+  name: 'editFile',
+  description: 'Edit a file by replacing exact string matches',
+  inputSchema: z.object({
+    filePath: z.string().describe('Path to the file to edit'),
+    oldText: z.string().describe('Exact text to replace (must be unique in the file)'),
+    newText: z.string().describe('New text to replace with'),
+    replaceAll: z.boolean().optional().describe('Replace all occurrences (default: false)')
+  }),
+  run: async (input) => {
+    if (!toolExecutorContext) {
+      throw new Error('Tool executor context not initialized');
+    }
+
+    const fullPath = path.resolve(toolExecutorContext.workingDir, input.filePath);
     let content = await fs.readFile(fullPath, 'utf-8');
 
-    if (replaceAll) {
-      content = content.split(oldText).join(newText);
+    if (input.replaceAll) {
+      content = content.split(input.oldText).join(input.newText);
     } else {
-      if (!content.includes(oldText)) {
-        return new ToolResult(false, null, 'Old text not found in file');
+      if (!content.includes(input.oldText)) {
+        return JSON.stringify({
+          success: false,
+          error: 'Old text not found in file'
+        });
       }
-      content = content.replace(oldText, newText);
+      content = content.replace(input.oldText, input.newText);
     }
 
     await fs.writeFile(fullPath, content, 'utf-8');
-    return new ToolResult(true, { path: fullPath, replacements: 1 });
-  }
 
-  // 搜索文件
-  async searchFiles({ pattern, cwd }) {
-    const searchDir = cwd ? path.resolve(this.workingDir, cwd) : this.workingDir;
-    const files = await glob(pattern, { cwd: searchDir });
-    return new ToolResult(true, { files, count: files.length });
-  }
-
-  // 搜索代码
-  async searchCode({ pattern, path: searchPath, fileType }) {
-    const { searchCode } = await import('./search.js');
-    const results = await searchCode(pattern, {
-      path: searchPath ? path.resolve(this.workingDir, searchPath) : this.workingDir,
-      type: fileType
+    return JSON.stringify({
+      success: true,
+      path: fullPath,
+      replacements: 1
     });
-    return new ToolResult(true, results);
   }
+});
 
-  // 列出文件
-  async listFiles({ dirPath, recursive = false, showHidden = false }) {
-    const fullPath = dirPath ? path.resolve(this.workingDir, dirPath) : this.workingDir;
+/**
+ * 搜索文件工具
+ */
+export const searchFilesTool = betaZodTool({
+  name: 'searchFiles',
+  description: 'Search for files by name pattern using glob',
+  inputSchema: z.object({
+    pattern: z.string().describe('Glob pattern (e.g., "**/*.js", "src/**/*.ts")'),
+    cwd: z.string().optional().describe('Working directory (default: current directory)')
+  }),
+  run: async (input) => {
+    if (!toolExecutorContext) {
+      throw new Error('Tool executor context not initialized');
+    }
+
+    const searchDir = input.cwd
+      ? path.resolve(toolExecutorContext.workingDir, input.cwd)
+      : toolExecutorContext.workingDir;
+
+    const files = await glob(input.pattern, { cwd: searchDir });
+
+    return JSON.stringify({
+      success: true,
+      files,
+      count: files.length
+    });
+  }
+});
+
+/**
+ * 搜索代码内容工具
+ */
+export const searchCodeTool = betaZodTool({
+  name: 'searchCode',
+  description: 'Search for text/patterns in file contents',
+  inputSchema: z.object({
+    pattern: z.string().describe('Regex pattern to search for'),
+    path: z.string().optional().describe('Directory to search in (default: current directory)'),
+    fileType: z.string().optional().describe('Filter by file type (e.g., "js", "py")')
+  }),
+  run: async (input) => {
+    if (!toolExecutorContext) {
+      throw new Error('Tool executor context not initialized');
+    }
+
+    const { searchCode } = await import('./search.js');
+    const results = await searchCode(input.pattern, {
+      path: input.path
+        ? path.resolve(toolExecutorContext.workingDir, input.path)
+        : toolExecutorContext.workingDir,
+      type: input.fileType
+    });
+
+    return JSON.stringify({
+      success: true,
+      ...results
+    });
+  }
+});
+
+/**
+ * 列出目录工具
+ */
+export const listFilesTool = betaZodTool({
+  name: 'listFiles',
+  description: 'List files and directories in a path',
+  inputSchema: z.object({
+    dirPath: z.string().optional().describe('Directory path (default: current directory)'),
+    recursive: z.boolean().optional().describe('List recursively (default: false)'),
+    showHidden: z.boolean().optional().describe('Show hidden files (default: false)')
+  }),
+  run: async (input) => {
+    if (!toolExecutorContext) {
+      throw new Error('Tool executor context not initialized');
+    }
+
+    const fullPath = input.dirPath
+      ? path.resolve(toolExecutorContext.workingDir, input.dirPath)
+      : toolExecutorContext.workingDir;
+
     const files = await fs.readdir(fullPath, { withFileTypes: true });
 
     const result = [];
     for (const file of files) {
-      if (!showHidden && file.name.startsWith('.')) continue;
+      if (!input.showHidden && file.name.startsWith('.')) continue;
       result.push({
         name: file.name,
         type: file.isDirectory() ? 'directory' : 'file',
@@ -395,56 +269,52 @@ export class ToolExecutor {
       });
     }
 
-    return new ToolResult(true, { files: result, path: fullPath });
-  }
-
-  // 分析错误
-  async analyzeError({ error, context }) {
-    // 这是一个特殊的工具，返回结构化的错误分析
-    return new ToolResult(true, {
-      error,
-      context,
-      analysis: {
-        summary: 'Error analysis - AI will provide detailed analysis',
-        suggestions: ['Check syntax', 'Review dependencies', 'Verify configuration']
-      }
+    return JSON.stringify({
+      success: true,
+      files: result,
+      path: fullPath
     });
   }
+});
 
-  // 运行测试
-  async runTests({ testCommand, filter }) {
-    let command = testCommand;
+/**
+ * 所有工具的导出映射
+ */
+const TOOLS_MAP = {
+  bash: bashTool,
+  readFile: readFileTool,
+  writeFile: writeFileTool,
+  editFile: editFileTool,
+  searchFiles: searchFilesTool,
+  searchCode: searchCodeTool,
+  listFiles: listFilesTool
+};
 
-    if (!command) {
-      // 自动检测测试命令
-      const packageJsonPath = path.join(this.workingDir, 'package.json');
-      try {
-        const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf-8'));
-        command = packageJson.scripts?.test || 'npm test';
-      } catch {
-        command = 'npm test';
-      }
-    }
-
-    if (filter) {
-      command += ` -- ${filter}`;
-    }
-
-    return await this.bash({ command });
-  }
-
-  // 规划任务
-  async planTask({ task, context }) {
-    // 返回任务描述，AI 会生成详细计划
-    return new ToolResult(true, {
-      task,
-      context,
-      message: 'Task planning request - AI will generate detailed plan'
-    });
-  }
+/**
+ * 获取启用工具的数组（用于 toolRunner）
+ * @param {Array<string>} enabledTools - 启用的工具名称数组
+ * @returns {Array} betaZodTool 对象数组
+ */
+export function getToolDefinitions(enabledTools) {
+  return enabledTools
+    .map(toolName => TOOLS_MAP[toolName])
+    .filter(tool => tool !== undefined);
 }
 
-// 获取工具列表（用于 AI）
-export function getToolDefinitions(enabledTools) {
-  return Object.values(TOOLS).filter(tool => enabledTools.includes(tool.name));
+/**
+ * 获取工具的 JSON Schema 定义（用于兼容性）
+ * @param {Array<string>} enabledTools - 启用的工具名称数组
+ * @returns {Array} JSON Schema 格式的工具定义
+ */
+export function getToolSchemaDefinitions(enabledTools) {
+  return enabledTools
+    .filter(toolName => TOOLS_MAP[toolName] !== undefined)
+    .map(toolName => {
+      const tool = TOOLS_MAP[toolName];
+      return {
+        name: tool.name,
+        description: tool.description,
+        inputSchema: tool.input_schema
+      };
+    });
 }
