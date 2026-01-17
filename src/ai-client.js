@@ -86,6 +86,12 @@ export class AnthropicClient {
         description: tool.description,
         input_schema: tool.inputSchema
       }));
+
+      // 调试：打印发送给API的工具定义
+      console.error(`[AI Client] Sending ${requestBody.tools.length} tools to API:`);
+      requestBody.tools.forEach(tool => {
+        console.error(`  - ${tool.name}:`, JSON.stringify(tool.input_schema, null, 2));
+      });
     }
 
     const response = await fetch(`${this.baseURL}/v1/messages`, {

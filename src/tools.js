@@ -65,7 +65,7 @@ export const TOOLS = {
   // 写入文件
   writeFile: {
     name: 'writeFile',
-    description: 'Write content to a file (creates or overwrites)',
+    description: 'Write content to a file (creates or overwrites). Supports both plain text content and base64-encoded content.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -75,7 +75,11 @@ export const TOOLS = {
         },
         content: {
           type: 'string',
-          description: 'Content to write to the file'
+          description: 'Content to write to the file (plain text)'
+        },
+        contentBase64: {
+          type: 'string',
+          description: 'Content to write to the file (base64 encoded, use this for binary data or special characters)'
         },
         encoding: {
           type: 'string',
@@ -83,7 +87,7 @@ export const TOOLS = {
           default: 'utf-8'
         }
       },
-      required: ['filePath', 'content']
+      required: ['filePath']
     }
   },
 
@@ -319,10 +323,26 @@ export class ToolExecutor {
   }
 
   // 写入文件
-  async writeFile({ filePath, content, encoding = 'utf-8' }) {
+  async writeFile({ filePath, content, contentBase64, encoding = 'utf-8' }) {
     const fullPath = path.resolve(this.workingDir, filePath);
-    await fs.writeFile(fullPath, content, encoding);
-    return new ToolResult(true, { path: fullPath, size: content.length });
+
+    // 优先使用 contentBase64，否则使用 content
+    let dataToWrite;
+    if (contentBase64) {
+      // 解码 base64
+      dataToWrite = Buffer.from(contentBase64, 'base64');
+    } else if (content !== undefined) {
+      dataToWrite = content;
+    } else {
+      return new ToolResult(false, null, 'Either content or contentBase64 must be provided');
+    }
+
+    await fs.writeFile(fullPath, dataToWrite, encoding);
+    return new ToolResult(true, {
+      path: fullPath,
+      size: dataToWrite.length,
+      encoding: contentBase64 ? 'base64' : encoding
+    });
   }
 
   // 编辑文件

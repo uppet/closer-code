@@ -147,6 +147,12 @@ Call writeFile tool:
 >>>CALL:writeFile
 {"filePath":"test.txt","content":"Hello World"}
 <<<
+
+OR for binary/special content (base64 encoded):
+\`\`\`
+>>>CALL:writeFile
+{"filePath":"test.txt","contentBase64":"SGVsbG8gV29ybGQ="}
+<<<
 \`\`\`
 
 **IMPORTANT RULES:**
@@ -434,18 +440,60 @@ ${JSON.stringify(projectInfo.patterns, null, 2)}
 
         const followUpText = followUp.content.find(c => c.type === 'text')?.text || '';
 
+        // 解析 follow-up 中的文本工具调用（格式: >>>CALL:toolName\nJSON\n<<<）
+        const followUpToolCalls = parseToolCalls(followUpText);
+
+        // 清理 follow-up 文本，移除工具调用标记
+        const cleanedFollowUp = cleanToolCallMarkers(followUpText);
+
+        // 如果有工具调用，执行它们
+        let finalFollowUp = cleanedFollowUp;
+        if (followUpToolCalls.length > 0) {
+          console.log(`Found ${followUpToolCalls.length} tool calls in follow-up response`);
+
+          for (const toolCall of followUpToolCalls) {
+            if (onProgress) {
+              onProgress({
+                type: 'tool_start',
+                tool: toolCall.name,
+                input: toolCall.input
+              });
+            }
+
+            const result = await this.toolExecutor.execute(toolCall.name, toolCall.input);
+
+            // 记录工具调用
+            await logToolCall(toolCall.name, toolCall.input, result);
+
+            // 添加工具结果到消息历史
+            this.messages.push({
+              role: MessageType.TOOL,
+              toolUseId: toolCall.id,
+              content: JSON.stringify(result)
+            });
+
+            if (onProgress) {
+              onProgress({
+                type: 'tool_complete',
+                tool: toolCall.name,
+                result
+              });
+            }
+          }
+        }
+
         this.messages.push({
           role: MessageType.ASSISTANT,
-          content: followUpText
+          content: cleanedFollowUp
         });
 
         // 保存历史
         saveHistory(this.messages);
 
         return {
-          content: cleanedResponse + '\n\n' + followUpText,
+          content: cleanedResponse + '\n\n' + finalFollowUp,
           toolCalls: toolCalls.map(t => t.name),
-          followUp: followUpText
+          followUp: finalFollowUp
         };
       }
 

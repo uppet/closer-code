@@ -23,7 +23,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 开发指南
 
 ### 运行测试脚本
-use [winfix.md] to set bash exprot PATH
+read [PATH hints](./winfix.md) to set bash exprot PATH
 ```bash
 # 运行某个测试脚本（具体取决于项目中的文件）
 node <script-name>.js

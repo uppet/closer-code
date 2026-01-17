@@ -6,6 +6,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { render, Box, Text } from 'ink';
 import TextInput from 'ink-text-input';
+import { useInput } from 'ink';
 import { createConversation } from './conversation.js';
 import { getConfig, updateConfig } from './config.js';
 import { createShortcutManager } from './shortcuts.js';
@@ -45,12 +46,36 @@ function MessageItem({ message }) {
     ? message.content
     : JSON.stringify(message.content);
 
+  // 限制消息的最大行数和字符数
+  const maxLines = 10;
+  const maxChars = 1000;
+
+  const lines = content.split('\n');
+  let displayContent = content;
+  let isTruncated = false;
+
+  if (content.length > maxChars) {
+    displayContent = content.slice(0, maxChars);
+    isTruncated = true;
+  }
+
+  const displayLines = displayContent.split('\n');
+  if (displayLines.length > maxLines) {
+    displayContent = displayLines.slice(0, maxLines).join('\n');
+    isTruncated = true;
+  }
+
   return (
-    <Box marginBottom={1} flexDirection="column">
-      <Text dim color={color}>
-        {prefix}
-      </Text>
-      <Text color={color}>{content}</Text>
+    <Box marginBottom={1} flexDirection="column" width="100%">
+      <Box width="100%">
+        <Text dim color={color}>
+          {prefix}
+        </Text>
+        <Text color={color} wrap="wrap">{displayContent}</Text>
+        {isTruncated && (
+          <Text dim color="gray">... (truncated)</Text>
+        )}
+      </Box>
     </Box>
   );
 }
@@ -92,20 +117,37 @@ function TaskProgress({ plan }) {
 
 // 工具执行显示组件
 function ToolExecution({ tool, input, result }) {
+  // 限制输入和结果的显示长度
+  const maxDisplayLength = 100;
+
+  const displayInput = input
+    ? (JSON.stringify(input).length > maxDisplayLength
+        ? JSON.stringify(input).slice(0, maxDisplayLength) + '...'
+        : JSON.stringify(input))
+    : null;
+
+  const displayResult = result
+    ? (result.success
+        ? '✓ Success'
+        : (result.error && result.error.length > maxDisplayLength
+            ? result.error.slice(0, maxDisplayLength) + '...'
+            : result.error || 'Failed'))
+    : null;
+
   return (
-    <Box flexDirection="column" marginBottom={1} paddingX={1} borderStyle="single" borderColor="gray">
-      <Box>
+    <Box flexDirection="column" marginBottom={1} paddingX={1} borderStyle="single" borderColor="gray" width="100%">
+      <Box width="100%">
         <Text bold color="yellow">⚡ {tool}</Text>
       </Box>
-      {input && (
-        <Box>
-          <Text dim>Input: {JSON.stringify(input).slice(0, 50)}...</Text>
+      {displayInput && (
+        <Box width="100%">
+          <Text dim>Input: {displayInput}</Text>
         </Box>
       )}
-      {result && (
-        <Box>
+      {displayResult && (
+        <Box width="100%">
           <Text color={result.success ? 'green' : 'red'}>
-            {result.success ? '✓' : '✗'} {result.success ? 'Success' : result.error}
+            {result.success ? '✓' : '✗'} {displayResult}
           </Text>
         </Box>
       )}
@@ -125,6 +167,23 @@ function App() {
   const [status, setStatus] = useState('Initializing...');
   const [messageCounter, setMessageCounter] = useState(0);
   const [activity, setActivity] = useState(null); // 当前活动描述
+  const [logs, setLogs] = useState([]); // 日志内容
+  const [scrollOffset, setScrollOffset] = useState(0); // 滚动偏移量（从底部开始）
+  const maxVisibleMessages = 15; // 最多显示15条消息
+
+  // 键盘输入处理（用于滚动）
+  useInput((input, key) => {
+    // 当不在输入模式时处理滚动
+    if (key.upArrow) {
+      setScrollOffset(prev => Math.min(prev + 5, Math.max(0, messages.length - maxVisibleMessages)));
+    } else if (key.downArrow) {
+      setScrollOffset(prev => Math.max(0, prev - 5));
+    } else if (key.pageUp) {
+      setScrollOffset(prev => Math.min(prev + 10, Math.max(0, messages.length - maxVisibleMessages)));
+    } else if (key.pageDown || key.return) {
+      setScrollOffset(0); // 回到底部
+    }
+  });
 
   // 初始化
   useEffect(() => {
@@ -135,6 +194,9 @@ function App() {
 
         const conv = await createConversation(cfg);
         setConversation(conv);
+
+        // 加载日志
+        await loadLatestLogs();
 
         // 欢迎消息
         const welcomeMsg = {
@@ -164,6 +226,35 @@ Type your message or command to get started.`
     init();
   }, []);
 
+  // 加载最新日志
+  const loadLatestLogs = async () => {
+    try {
+      const fs = await import('fs/promises');
+      const path = await import('path');
+      const os = await import('os');
+
+      const logDir = path.join(os.homedir(), '.closer-code', 'logs');
+      const files = await fs.readdir(logDir);
+
+      // 找到最新的日志文件
+      const logFiles = files
+        .filter(f => f.startsWith('closer_debug_log_'))
+        .sort()
+        .reverse();
+
+      if (logFiles.length > 0) {
+        const latestLog = path.join(logDir, logFiles[0]);
+        const content = await fs.readFile(latestLog, 'utf-8');
+
+        // 只显示最后 50 行
+        const lines = content.split('\n').slice(-50);
+        setLogs(lines);
+      }
+    } catch (error) {
+      console.error('Failed to load logs:', error);
+    }
+  };
+
   // 处理用户输入
   const handleSubmit = useCallback(async (value) => {
     if (!conversation || isProcessing) return;
@@ -171,6 +262,7 @@ Type your message or command to get started.`
     setInput('');
     setIsProcessing(true);
     setActivity('📤 发送消息到 AI...');
+    setScrollOffset(0); // 重置滚动到底部
 
     // 添加用户消息
     const userMsg = { role: 'user', content: value };
@@ -383,32 +475,100 @@ Type your message or command to get started.`
         </Box>
       </Box>
 
-      {/* 主内容区域 */}
-      <Box flexGrow={1}>
-        <Box width="100%">
-          {/* 左侧：对话面板 */}
-          <Panel title="💬 Conversation" borderColor="blue" flex={2}>
-            <Box flexGrow={1} flexDirection="column" overflow="hidden">
-              {messages.map((message, index) => (
-                <MessageItem key={message.key || index} message={message} />
-              ))}
-            </Box>
-          </Panel>
+      {/* 日志区域 - 占35%高度 */}
+      <Box
+        borderStyle="round"
+        borderColor="gray"
+        flexDirection="column"
+        flexGrow={35}
+        marginBottom={1}
+        width="100%"
+      >
+        <Box borderBottom={false} borderColor="gray" paddingBottom={0} marginBottom={1}>
+          <Text bold color="gray">📋 Latest Logs</Text>
+        </Box>
+        <Box flexGrow={1} flexDirection="column" overflow="hidden" width="100%">
+          {logs.length > 0 ? (
+            logs.slice(-30).map((line, i) => (
+              <Box key={i} width="100%">
+                <Text dim color="gray" wrap="truncate">{line.slice(0, 150)}</Text>
+              </Box>
+            ))
+          ) : (
+            <Text dim>No logs available</Text>
+          )}
+        </Box>
+      </Box>
 
-          {/* 右侧：任务和工具面板 */}
-          <Box flexDirection="column" flex={1}>
-            {/* 任务进度 */}
-            <Panel title="📋 Task Progress" borderColor="yellow">
+      {/* 主内容区域 - 占剩余65% */}
+      <Box flexGrow={65} flexDirection="row">
+        <Box width="100%">
+          {/* 左侧：对话面板 - 占67%宽度 */}
+          <Box
+            borderStyle="round"
+            borderColor="blue"
+            flexDirection="column"
+            flexGrow={67}
+            marginRight={1}
+            width="67%"
+            height="100%"
+          >
+            <Box borderBottom={false} borderColor="blue" paddingBottom={0} marginBottom={1}>
+              <Text bold color="blue">💬 Conversation</Text>
+            </Box>
+            <Box flexGrow={1} flexDirection="column" overflow="hidden" width="100%" height="100%">
+              {messages.length > 0 ? (
+                <>
+                  {scrollOffset > 0 && (
+                    <Box marginBottom={1} width="100%">
+                      <Text dim color="blue">↑ Scrolled up ({scrollOffset} lines hidden) - Press ↓/Enter to return</Text>
+                    </Box>
+                  )}
+                  {messages
+                    .slice(Math.max(0, messages.length - maxVisibleMessages - scrollOffset), messages.length - scrollOffset || undefined)
+                    .map((message, index) => (
+                      <MessageItem key={message.key || index} message={message} />
+                    ))}
+                </>
+              ) : (
+                <Text dim>No messages yet</Text>
+              )}
+            </Box>
+          </Box>
+
+          {/* 右侧：任务和工具面板 - 占33%宽度 */}
+          <Box flexDirection="column" flexGrow={33} width="33%" height="100%">
+            {/* 任务进度 - 占50%高度 */}
+            <Box
+              borderStyle="round"
+              borderColor="yellow"
+              flexDirection="column"
+              flexGrow={50}
+              marginBottom={1}
+              width="100%"
+            >
+              <Box borderBottom={false} borderColor="yellow" paddingBottom={0} marginBottom={1}>
+                <Text bold color="yellow">📋 Task Progress</Text>
+              </Box>
               {currentPlan ? (
                 <TaskProgress plan={currentPlan} />
               ) : (
                 <Text dim>No active task</Text>
               )}
-            </Panel>
+            </Box>
 
-            {/* 工具执行 */}
-            <Panel title="🔧 Tool Execution" borderColor="green">
-              <Box flexDirection="column" overflow="hidden">
+            {/* 工具执行 - 占50%高度 */}
+            <Box
+              borderStyle="round"
+              borderColor="green"
+              flexDirection="column"
+              flexGrow={50}
+              width="100%"
+            >
+              <Box borderBottom={false} borderColor="green" paddingBottom={0} marginBottom={1}>
+                <Text bold color="green">🔧 Tool Execution</Text>
+              </Box>
+              <Box flexDirection="column" overflow="hidden" width="100%">
                 {toolExecutions.slice(-5).map((exec, i) => (
                   <ToolExecution key={i} {...exec} />
                 ))}
@@ -416,7 +576,7 @@ Type your message or command to get started.`
                   <Text dim>No tools executed yet</Text>
                 )}
               </Box>
-            </Panel>
+            </Box>
           </Box>
         </Box>
       </Box>
