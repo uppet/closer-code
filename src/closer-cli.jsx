@@ -47,42 +47,55 @@ function TaskProgress({ plan }) {
                      plan.status === 'in_progress' ? 'yellow' : 'gray';
 
   // 进度条
-  const barWidth = 30;
+  const barWidth = 20;
   const filled = Math.round((percentage / 100) * barWidth);
   const empty = barWidth - filled;
   const bar = '█'.repeat(filled) + '░'.repeat(empty);
 
-  // Plan 类型标识
-  const typeLabel = plan.type === 'auto' ? '🤖 AI' : '📋';
+  // Plan 类型标识和摘要
+  const typeLabel = plan.type === 'auto' ? '🤖' : '📋';
+  const summary = plan.getSummary ? plan.getSummary() : `${completed}/${total}`;
 
   return (
     <Box flexDirection="column" marginBottom={1}>
-      <Box>
+      {/* 父计划摘要 */}
+      <Box flexDirection="row" justifyContent="space-between" width="100%">
         <Text bold color={statusColor}>
-          {typeLabel} {plan.description}
+          {typeLabel} {plan.description.substring(0, 40)}{plan.description.length > 40 ? '...' : ''}
         </Text>
+        <Text dim>{summary}</Text>
       </Box>
+
+      {/* 进度条 */}
       <Box>
         <Text color="cyan">[{bar}]</Text>
         <Text dim> {completed}/{total} ({Math.round(percentage)}%)</Text>
       </Box>
+
+      {/* 最近 5 个步骤 */}
       {plan.steps && plan.steps.length > 0 && (
         <Box flexDirection="column" marginTop={1}>
-          {plan.steps.slice(-3).map((step, i) => {
+          {plan.steps.slice(-5).map((step, i) => {
             const stepIcon = step.status === 'completed' ? '✓' :
                            step.status === 'in_progress' ? '→' :
                            step.status === 'failed' ? '✗' : '○';
             const stepColor = step.status === 'completed' ? 'green' :
                             step.status === 'in_progress' ? 'yellow' :
                             step.status === 'failed' ? 'red' : 'gray';
+            // 步骤描述限制为 40 字符
+            const shortDesc = step.description.length > 40
+              ? step.description.substring(0, 40) + '...'
+              : step.description;
             return (
               <Box key={step.id || i}>
-                <Text color={stepColor}>{stepIcon} {step.description}</Text>
+                <Text color={stepColor}>{stepIcon} {shortDesc}</Text>
               </Box>
             );
           })}
         </Box>
       )}
+
+      {/* 错误信息 */}
       {plan.metadata?.error && (
         <Box>
           <Text color="red">Error: {plan.metadata.error}</Text>
@@ -93,43 +106,78 @@ function TaskProgress({ plan }) {
 }
 
 // 工具执行显示组件
-function ToolExecution({ tool, input, result }) {
-  // 限制输入和结果的显示长度
-  const maxDisplayLength = 100;
-
-  const displayInput = input
-    ? (JSON.stringify(input).length > maxDisplayLength
-        ? JSON.stringify(input).slice(0, maxDisplayLength) + '...'
-        : JSON.stringify(input))
-    : null;
-
-  const displayResult = result
-    ? (result.success
-        ? '✓ Success'
-        : (result.error && result.error.length > maxDisplayLength
-            ? result.error.slice(0, maxDisplayLength) + '...'
-            : result.error || 'Failed'))
-    : null;
-
+function ToolExecution({ summary, timestamp }) {
   return (
     <Box flexDirection="column" marginBottom={1} paddingX={1} borderStyle="single" borderColor="gray" width="100%">
       <Box width="100%">
-        <Text bold color="yellow">⚡ {tool}</Text>
+        <Text>{summary}</Text>
+        <Text dim> [{timestamp}]</Text>
       </Box>
-      {displayInput && (
-        <Box width="100%">
-          <Text dim>Input: {displayInput}</Text>
-        </Box>
-      )}
-      {displayResult && (
-        <Box width="100%">
-          <Text color={result.success ? 'green' : 'red'}>
-            {result.success ? '✓' : '✗'} {displayResult}
-          </Text>
-        </Box>
-      )}
     </Box>
   );
+}
+
+/**
+ * 将thinking消息格式化为行数组
+ * @param {string} thought - thinking消息
+ * @param {number} maxWidth - 最大宽度（字符数）
+ * @returns {Array} - 行数组
+ */
+function formatThinkingAsLines(thought, maxWidth = 80) {
+  const lines = [];
+
+  // 提取emoji图标
+  const emojiMatch = thought.match(/^([\p{Emoji}]{1,2})\s+/u);
+  const emoji = emojiMatch ? emojiMatch[1] : '•';
+  const content = thought.replace(/^[\p{Emoji}]{1,2}\s+/u, '');
+
+  // 提取时间戳
+  const timestampMatch = content.match(/\[.*?\]/);
+  const timestamp = timestampMatch ? timestampMatch[0] : '';
+  const messageContent = timestampMatch ? content.replace(/\[.*?\]\s*/, '') : content;
+
+  // 根据emoji确定颜色
+  const colorMap = {
+    '🤔': 'cyan',
+    '✅': 'green',
+    '✍️': 'yellow',
+    '⚡': 'yellow',
+    '📊': 'blue',
+    '🔒': 'magenta',
+    '❌': 'red',
+    '📋': 'yellow',
+    '•': 'gray'
+  };
+  const color = colorMap[emoji] || 'gray';
+
+  // 添加第一行（emoji + timestamp）
+  const prefixLine = `${emoji} ${timestamp}`;
+  lines.push({
+    text: prefixLine,
+    color: color,
+    type: 'prefix'
+  });
+
+  // 分割内容为行
+  const contentWidth = maxWidth - 4; // 留出缩进
+  if (messageContent.length > contentWidth) {
+    for (let i = 0; i < messageContent.length; i += contentWidth) {
+      const chunk = messageContent.slice(i, i + contentWidth);
+      lines.push({
+        text: '    ' + chunk, // 缩进4个空格
+        color: color,
+        type: 'content'
+      });
+    }
+  } else {
+    lines.push({
+      text: '    ' + (messageContent || ''),
+      color: color,
+      type: 'content'
+    });
+  }
+
+  return lines;
 }
 
 /**
@@ -228,6 +276,7 @@ function App() {
   const [activity, setActivity] = useState(null); // 当前活动描述
   const [thinking, setThinking] = useState([]); // AI 思考过程
   const [thinkingEnabled, setThinkingEnabled] = useState(true); // Thinking 开关状态
+  const [thinkingScrollPosition, setThinkingScrollPosition] = useState(0); // Thinking滚动位置
 
   // 终端尺寸状态
   const [terminalSize, setTerminalSize] = useState({
@@ -254,6 +303,10 @@ function App() {
   const [messageLines, setMessageLines] = useState([]); // 所有消息行
   const [scrollPosition, setScrollPosition] = useState(0); // 当前滚动位置
   const conversationHeight = Math.floor(terminalSize.rows * 0.65) - 2; // Conversation区域高度（行数）
+
+  // Thinking区域滚动管理
+  const [thinkingLines, setThinkingLines] = useState([]); // 所有thinking行
+  const thinkingHeight = 3; // Thinking区域固定显示3行
   
   // Ctrl+C 退出控制
   const [lastCtrlC, setLastCtrlC] = useState(0);
@@ -281,6 +334,23 @@ function App() {
       setScrollPosition(maxPosition);
     }
   }, [messages, terminalSize.columns, conversationHeight, isProcessing]);
+
+  // 当thinking更新时，重新计算行
+  useEffect(() => {
+    const allLines = [];
+    const maxWidth = Math.floor(terminalSize.columns) - 4; // Thinking区域宽度
+
+    for (const thought of thinking) {
+      const lines = formatThinkingAsLines(thought, maxWidth);
+      allLines.push(...lines);
+    }
+
+    setThinkingLines(allLines);
+
+    // 自动滚动到底部
+    const maxPosition = Math.max(0, allLines.length - thinkingHeight);
+    setThinkingScrollPosition(maxPosition);
+  }, [thinking, terminalSize.columns, thinkingHeight]);
 
   // 键盘输入处理（用于滚动和 Ctrl+C）
   useInput((input, key) => {
@@ -359,6 +429,13 @@ function App() {
     } else if (key.alt && key.downArrow) {
       const maxPosition = Math.max(0, messageLines.length - conversationHeight);
       setScrollPosition(prev => Math.min(maxPosition, prev + 1));
+    }
+    // Shift + 方向键 - 滚动Thinking区域
+    else if (key.shift && key.upArrow) {
+      setThinkingScrollPosition(prev => Math.max(0, prev - 1));
+    } else if (key.shift && key.downArrow) {
+      const maxPosition = Math.max(0, thinkingLines.length - thinkingHeight);
+      setThinkingScrollPosition(prev => Math.min(maxPosition, prev + 1));
     }
   }, { capture: true }); // capture: true 确保能捕获按键
 
@@ -524,18 +601,71 @@ Type your message or command to get started.`
             const thinkingMsg = `⚡ [${new Date().toLocaleTimeString()}] 调用工具: ${progress.tool}`;
             setActivity(`⚡ 执行工具: ${progress.tool}...`);
             setThinking(prev => [...prev, thinkingMsg]);
-            setToolExecutions(prev => [...prev, {
-              tool: progress.tool,
-              input: progress.input,
-              result: null
-            }]);
+            // 存储工具信息，包括 input 和 result 引用（用于生成摘要）
+            setToolExecutions(prev => {
+              const newExecs = [...prev, {
+                tool: progress.tool,
+                timestamp: new Date().toLocaleTimeString(),
+                input: progress.input,
+                result: null
+              }];
+              // 只保留最近 10 个
+              return newExecs.slice(-10);
+            });
           } else if (progress.type === 'tool_complete') {
             const resultMsg = progress.result.success ? '✓ 成功' : '✗ 失败';
             setActivity('📊 处理工具结果...');
             setThinking(prev => [...prev, `📊 [${new Date().toLocaleTimeString()}] 工具执行结果: ${resultMsg}`]);
+            // 更新工具执行结果，并生成摘要
             setToolExecutions(prev => {
+              if (prev.length === 0) return prev;
               const newExecs = [...prev];
-              newExecs[newExecs.length - 1].result = progress.result;
+              const lastExec = newExecs[newExecs.length - 1];
+
+              // 生成简短摘要（不使用完整数据）
+              let summary = '';
+              const tool = lastExec.tool;
+              const input = lastExec.input || {};
+              const result = progress.result;
+
+              // 根据工具类型生成摘要
+              if (tool === 'bash') {
+                const cmd = input.command || '';
+                const parts = cmd.trim().split(/\s+/);
+                const command = parts[0] || 'bash';
+                const arg1 = parts[1] ? parts[1].substring(0, 20) : '';
+                summary = result.success
+                  ? `✓ ${command} ${arg1}`
+                  : `✗ ${command}`;
+              } else if (tool === 'readFile') {
+                const filePath = input.filePath || '';
+                const fileName = filePath.split('/').pop().substring(0, 20);
+                summary = result.success
+                  ? `📖 ${fileName}`
+                  : `✗ ${fileName}`;
+              } else if (tool === 'writeFile') {
+                const filePath = input.filePath || '';
+                const fileName = filePath.split('/').pop().substring(0, 20);
+                summary = result.success
+                  ? `✍️ ${fileName}`
+                  : `✗ ${fileName}`;
+              } else if (tool === 'editFile') {
+                const filePath = input.filePath || '';
+                const fileName = filePath.split('/').pop().substring(0, 20);
+                summary = result.success
+                  ? `✏️ ${fileName}`
+                  : `✗ ${fileName}`;
+              } else {
+                summary = result.success
+                  ? `✓ ${tool}`
+                  : `✗ ${tool}`;
+              }
+
+              newExecs[newExecs.length - 1] = {
+                ...lastExec,
+                result: progress.result,
+                summary: summary
+              };
               return newExecs;
             });
           }
@@ -725,19 +855,34 @@ Type your message or command to get started.`
       >
         <Box borderBottom={false} borderColor="cyan" paddingBottom={0} marginBottom={1}>
           <Text bold color="cyan">
-            🧠 AI Thinking Process
-            <Text dim color="gray"> [Tab: {thinkingEnabled ? 'ON ✅' : 'OFF ❌'}]</Text>
+            🧠 AI Thinking Process ({thinking.length})
+            <Text dim color="gray"> [Tab: {thinkingEnabled ? 'ON ✅' : 'OFF ❌'}] [Shift+↑/↓: Scroll]</Text>
           </Text>
         </Box>
         <Box flexGrow={1} flexDirection="column" overflow="hidden" width="100%">
-          {thinking.length > 0 ? (
-            thinking.slice(-10).map((thought, i) => (
-              <Box key={i} width="100%">
-                <Text dim color="cyan" wrap="truncate">{thought}</Text>
-              </Box>
-            ))
+          {thinkingLines.length > 0 ? (
+            <>
+              {/* 滚动提示 */}
+              {thinkingScrollPosition > 0 && (
+                <Box marginBottom={1} width="100%">
+                  <Text dim color="cyan">↑ Line {thinkingScrollPosition + 1} of {thinkingLines.length} - Press Shift+↓ to scroll</Text>
+                </Box>
+              )}
+              {thinkingScrollPosition + thinkingHeight < thinkingLines.length && (
+                <Box marginBottom={1} width="100%">
+                  <Text dim color="cyan">↓ {thinkingLines.length - thinkingScrollPosition - thinkingHeight} more thoughts below</Text>
+                </Box>
+              )}
+              <ScrollContainer
+                items={thinkingLines}
+                height={thinkingHeight}
+                scrollPosition={thinkingScrollPosition}
+              />
+            </>
           ) : (
-            <Text dim color="gray">No thinking messages yet</Text>
+            <Box justifyContent="center" alignItems="center" height="100%">
+              <Text dim color="gray">No thinking messages yet</Text>
+            </Box>
           )}
         </Box>
       </Box>
@@ -819,7 +964,7 @@ Type your message or command to get started.`
                 <Text bold color="green">🔧 Tool Execution</Text>
               </Box>
               <Box flexDirection="column" overflow="hidden" width="100%">
-                {toolExecutions.slice(-5).map((exec, i) => (
+                {toolExecutions.slice(-3).map((exec, i) => (
                   <ToolExecution key={i} {...exec} />
                 ))}
                 {toolExecutions.length === 0 && (

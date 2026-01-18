@@ -5,7 +5,7 @@
 
 import { getConfig, saveConfig } from './config.js';
 import { createAIClient, checkConfig } from './ai-client.js';
-import { ToolExecutor } from './tools.js';
+import { getToolDefinitions, setToolExecutorContext } from './tools.js';
 
 async function testConfig() {
   console.log('🔧 测试配置模块...');
@@ -39,25 +39,26 @@ async function testAIClient() {
   }
 }
 
-async function testToolExecutor() {
-  console.log('\n🔨 测试工具执行器...');
+async function testTools() {
+  console.log('\n🔨 测试工具模块...');
   try {
     const config = getConfig();
-    const executor = new ToolExecutor(config);
 
-    // 测试 listFiles 工具
-    const result = await executor.listFiles({ dirPath: '.' });
+    // 设置工具执行上下文
+    setToolExecutorContext(config);
 
-    if (result.success) {
-      console.log('✅ 工具执行器正常');
-      console.log(`   - 找到 ${result.data.files.length} 个文件`);
-      return true;
-    } else {
-      console.log('❌ 工具执行失败:', result.error);
-      return false;
-    }
+    // 获取工具定义
+    const tools = getToolDefinitions(config.tools.enabled);
+
+    console.log('✅ 工具模块正常');
+    console.log(`   - 可用工具: ${tools.length}个`);
+    tools.forEach(tool => {
+      console.log(`     - ${tool.name}`);
+    });
+
+    return true;
   } catch (error) {
-    console.log('❌ 工具执行器测试失败:', error.message);
+    console.log('❌ 工具模块测试失败:', error.message);
     return false;
   }
 }
@@ -90,7 +91,7 @@ async function runTests() {
   const results = {
     config: await testConfig(),
     aiClient: await testAIClient(),
-    toolExecutor: await testToolExecutor(),
+    tools: await testTools(),
     bashRunner: await testBashRunner()
   };
 

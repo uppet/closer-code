@@ -342,3 +342,57 @@ export function getToolSchemaDefinitions(enabledTools) {
       };
     });
 }
+
+/**
+ * 生成工具执行的简短摘要
+ * @param {string} toolName - 工具名称
+ * @param {Object} input - 工具输入参数
+ * @param {Object} result - 工具执行结果
+ * @returns {string} 简短摘要
+ */
+export function generateToolSummary(toolName, input, result) {
+  const success = result?.success;
+
+  switch (toolName) {
+    case 'bash':
+      const cmd = input.command || '';
+      // 提取命令和第一个参数
+      const parts = cmd.trim().split(/\s+/);
+      const command = parts[0] || 'bash';
+      const arg1 = parts[1] ? parts[1].substring(0, 20) : '';
+      return success ? `✓ ${command} ${arg1}` : `✗ ${command}`;
+
+    case 'readFile':
+      const filePath = input.filePath || '';
+      const fileName = filePath.split('/').pop().substring(0, 20);
+      return success ? `📖 ${fileName}` : `✗ ${fileName}`;
+
+    case 'writeFile':
+      const writePath = input.filePath || '';
+      const writeFileName = writePath.split('/').pop().substring(0, 20);
+      return success ? `✍️ ${writeFileName}` : `✗ ${writeFileName}`;
+
+    case 'editFile':
+      const editPath = input.filePath || '';
+      const editFileName = editPath.split('/').pop().substring(0, 20);
+      return success ? `✏️ ${editFileName}` : `✗ ${editFileName}`;
+
+    case 'searchFiles':
+      const pattern = input.pattern || '';
+      const shortPattern = pattern.substring(0, 15);
+      return success ? `🔍 ${shortPattern}` : `✗ search`;
+
+    case 'searchCode':
+      const query = input.query || '';
+      const shortQuery = query.substring(0, 15);
+      return success ? `🔎 ${shortQuery}` : `✗ search`;
+
+    case 'listFiles':
+      const dirPath = input.path || '.';
+      const dirName = dirPath.split('/').pop() || '.';
+      return success ? `📁 ${dirName}` : `✗ ${dirName}`;
+
+    default:
+      return success ? `✓ ${toolName}` : `✗ ${toolName}`;
+  }
+}

@@ -147,6 +147,21 @@ export class Plan {
   }
 
   /**
+   * 获取简略的进度摘要
+   */
+  getSummary() {
+    const progress = this.getProgress();
+    const statusEmoji = {
+      [PlanStatus.PENDING]: '⏳',
+      [PlanStatus.IN_PROGRESS]: '⚙️',
+      [PlanStatus.COMPLETED]: '✅',
+      [PlanStatus.FAILED]: '❌'
+    };
+
+    return `${statusEmoji[this.status]} ${progress.completed}/${progress.total} (${progress.percentage}%)`;
+  }
+
+  /**
    * 转换为简单对象（用于序列化）
    */
   toJSON() {
