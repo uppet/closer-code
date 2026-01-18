@@ -11,6 +11,8 @@ import { createConversation } from './conversation.js';
 import { getConfig, updateConfig } from './config.js';
 import { createShortcutManager } from './shortcuts.js';
 import { createSnippetManager, SNIPPET_TEMPLATES } from './snippets.js';
+import fs from 'fs';
+import path from 'path';
 
 // 面板组件
 function Panel({ title, children, borderColor = 'gray', flex = 1 }) {
@@ -485,11 +487,30 @@ Type your message or command to get started.`
         setActivity(null);
         break;
 
+      case '/export':
+        if (args.length === 0) {
+          setMessages(prev => [...prev, {
+            role: 'system',
+            content: 'Usage: /export <filename> - Export conversation to a text file'
+          }]);
+          return;
+        }
+        setActivity('📤 导出对话...');
+        const filename = args.join(' ');
+        await exportConversation(conversation, filename);
+        setMessages(prev => [...prev, {
+          role: 'system',
+          content: `✅ Conversation exported to: ${filename}`
+        }]);
+        setActivity(null);
+        break;
+
       case '/help':
         setMessages(prev => [...prev, {
           role: 'system',
           content: `Available commands:
 /clear - Clear conversation history
+/export <filename> - Export conversation to a text file
 /plan <task> - Create and execute a task plan
 /learn - Learn project patterns
 /status - Show conversation summary
@@ -711,6 +732,75 @@ Type your message or command to get started.`
       </Box>
     </Box>
   );
+}
+
+// 导出对话到文本文件
+export async function exportConversation(conversation, filename) {
+  try {
+    const exportData = conversation.export();
+    const messages = exportData.messages || [];
+
+    // 生成文本格式
+    let textContent = '';
+    textContent += '='.repeat(80) + '\n';
+    textContent += 'Closer Code - Conversation Export\n';
+    textContent += '='.repeat(80) + '\n';
+    textContent += `Export Date: ${new Date().toLocaleString('zh-CN')}\n`;
+    textContent += `Total Messages: ${messages.length}\n`;
+    textContent += '='.repeat(80) + '\n\n';
+
+    messages.forEach((msg, index) => {
+      const role = msg.role || 'unknown';
+      const roleLabel = {
+        'user': '👤 User',
+        'assistant': '🤖 Assistant',
+        'system': 'ℹ️ System',
+        'error': '❌ Error'
+      }[role] || role;
+
+      textContent += `[${index + 1}] ${roleLabel}\n`;
+      textContent += '-'.repeat(80) + '\n';
+
+      const content = msg.content;
+      if (typeof content === 'string') {
+        textContent += content + '\n';
+      } else if (Array.isArray(content)) {
+        // 处理工具调用等复杂内容
+        content.forEach(block => {
+          if (block.type === 'text') {
+            textContent += block.text + '\n';
+          } else if (block.type === 'tool_use') {
+            textContent += `[Tool: ${block.name}]\n`;
+            textContent += JSON.stringify(block.input, null, 2) + '\n';
+          } else if (block.type === 'tool_result') {
+            textContent += `[Tool Result]\n`;
+            textContent += block.content + '\n';
+          }
+        });
+      } else {
+        textContent += JSON.stringify(content, null, 2) + '\n';
+      }
+
+      textContent += '\n';
+    });
+
+    textContent += '='.repeat(80) + '\n';
+    textContent += 'End of Export\n';
+    textContent += '='.repeat(80) + '\n';
+
+    // 确保文件名有 .txt 扩展名
+    let finalFilename = filename;
+    if (!filename.endsWith('.txt')) {
+      finalFilename = filename + '.txt';
+    }
+
+    // 写入文件
+    fs.writeFileSync(finalFilename, textContent, 'utf-8');
+
+    return { success: true, path: finalFilename };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
 }
 
 // 启动应用
