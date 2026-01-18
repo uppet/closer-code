@@ -545,9 +545,6 @@ npm run dev
 ```bash
 # 测试模块
 npm test
-
-# 测试批处理模式
-npm run test:batch
 ```
 
 ### 检查编译
@@ -555,6 +552,18 @@ npm run test:batch
 ```bash
 npm run check
 ```
+
+## 实验记录
+
+### Ctrl+C 双击退出功能
+
+在 Ink (React CLI) 应用中实现了标准的 Ctrl+C 双击退出行为。完整的实验记录和实现方案见 [CTRL_C_EXPERIMENT.md](./CTRL_C_EXPERIMENT.md)。
+
+**关键要点**：
+- 使用 `useInput` hook 的 `{ capture: true }` 选项捕获 Ctrl+C
+- 在 `render()` 时设置 `exitOnCtrlC: false` 禁用默认处理
+- 不使用 SIGINT 处理器（会导致立即退出）
+- 测试文件：`test-ctrl-c.jsx`
 
 ## 向后兼容
 

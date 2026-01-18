@@ -168,11 +168,56 @@ function App() {
   const [messageCounter, setMessageCounter] = useState(0);
   const [activity, setActivity] = useState(null); // 当前活动描述
   const [logs, setLogs] = useState([]); // 日志内容
+  const [thinking, setThinking] = useState([]); // AI 思考过程
   const [scrollOffset, setScrollOffset] = useState(0); // 滚动偏移量（从底部开始）
   const maxVisibleMessages = 15; // 最多显示15条消息
+  
+  // Ctrl+C 退出控制
+  const [lastCtrlC, setLastCtrlC] = useState(0);
+  const [showExitHint, setShowExitHint] = useState(false);
+  const [abortMessage, setAbortMessage] = useState(null); // 中止任务的提示
+  const abortControllerRef = useRef(null);
 
-  // 键盘输入处理（用于滚动）
+  // 键盘输入处理（用于滚动和 Ctrl+C）
   useInput((input, key) => {
+    // 处理 Ctrl+C 和 ESC
+    if ((key.ctrl && input === 'c') || key.escape) {
+      const now = Date.now();
+
+      if (isProcessing) {
+        // 如果 AI 正在执行，中止对话
+        if (abortControllerRef.current) {
+          abortControllerRef.current.abort();
+          abortControllerRef.current = null;
+        }
+        setIsProcessing(false);
+        setActivity('❌ 用户中止了 AI 执行');
+        setAbortMessage('❌ AI 执行已被中止');
+        setThinking(prev => [...prev, `❌ [${new Date().toLocaleTimeString()}] 用户中止了 AI 执行`]);
+
+        // 3秒后清除中止提示
+        setTimeout(() => {
+          setAbortMessage(null);
+          setActivity(null);
+        }, 3000);
+
+        return;
+      }
+
+      // 没有任务在执行时的退出逻辑
+      if (now - lastCtrlC < 1500) {
+        // 1.5秒内再次按下，退出程序
+        console.log('\n👋 再见！\n');
+        process.exit(0);
+      } else {
+        // 第一次按下，显示提示
+        setShowExitHint(true);
+        setLastCtrlC(now);
+        setTimeout(() => setShowExitHint(false), 1500);
+      }
+      return;
+    }
+    
     // 当不在输入模式时处理滚动
     if (key.upArrow) {
       setScrollOffset(prev => Math.min(prev + 5, Math.max(0, messages.length - maxVisibleMessages)));
@@ -183,7 +228,7 @@ function App() {
     } else if (key.pageDown || key.return) {
       setScrollOffset(0); // 回到底部
     }
-  });
+  }, { capture: true }); // capture: true 确保 Ctrl+C 被捕获而不是传递给终端
 
   // 初始化
   useEffect(() => {
@@ -277,6 +322,13 @@ Type your message or command to get started.`
     }
 
     try {
+      // 创建 AbortController 用于中止
+      const abortController = new AbortController();
+      abortControllerRef.current = abortController;
+      
+      // 记录思考开始
+      setThinking(prev => [...prev, `🤔 [${new Date().toLocaleTimeString()}] 开始分析用户请求...`]);
+      
       // 发送到 AI
       setActivity('🤔 AI 正在思考...');
       const response = await conversation.sendMessage(
@@ -285,6 +337,7 @@ Type your message or command to get started.`
           // 处理流式响应
           if (progress.type === 'token') {
             setActivity('✍️ AI 正在输入...');
+            setThinking(prev => [...prev, `✍️ [${new Date().toLocaleTimeString()}] 生成响应中...`]);
             setMessages(prev => {
               const lastMsg = prev[prev.length - 1];
 
@@ -308,14 +361,18 @@ Type your message or command to get started.`
               }
             });
           } else if (progress.type === 'tool_start') {
+            const thinkingMsg = `⚡ [${new Date().toLocaleTimeString()}] 调用工具: ${progress.tool}`;
             setActivity(`⚡ 执行工具: ${progress.tool}...`);
+            setThinking(prev => [...prev, thinkingMsg]);
             setToolExecutions(prev => [...prev, {
               tool: progress.tool,
               input: progress.input,
               result: null
             }]);
           } else if (progress.type === 'tool_complete') {
+            const resultMsg = progress.result.success ? '✓ 成功' : '✗ 失败';
             setActivity('📊 处理工具结果...');
+            setThinking(prev => [...prev, `📊 [${new Date().toLocaleTimeString()}] 工具执行结果: ${resultMsg}`]);
             setToolExecutions(prev => {
               const newExecs = [...prev];
               newExecs[newExecs.length - 1].result = progress.result;
@@ -324,6 +381,8 @@ Type your message or command to get started.`
           }
         }
       );
+      
+      abortControllerRef.current = null;
 
       // 更新最后的消息为完整响应
       setMessages(prev => {
@@ -475,12 +534,12 @@ Type your message or command to get started.`
         </Box>
       </Box>
 
-      {/* 日志区域 - 占35%高度 */}
+      {/* 日志区域 - 占17.5%高度 */}
       <Box
         borderStyle="round"
         borderColor="gray"
         flexDirection="column"
-        flexGrow={35}
+        flexGrow={17.5}
         marginBottom={1}
         width="100%"
       >
@@ -489,13 +548,38 @@ Type your message or command to get started.`
         </Box>
         <Box flexGrow={1} flexDirection="column" overflow="hidden" width="100%">
           {logs.length > 0 ? (
-            logs.slice(-30).map((line, i) => (
+            logs.slice(-15).map((line, i) => (
               <Box key={i} width="100%">
-                <Text dim color="gray" wrap="truncate">{line.slice(0, 150)}</Text>
+                <Text dim color="gray" wrap="truncate">{line.slice(0, 100)}</Text>
               </Box>
             ))
           ) : (
             <Text dim>No logs available</Text>
+          )}
+        </Box>
+      </Box>
+
+      {/* Thinking 区域 - 占17.5%高度 */}
+      <Box
+        borderStyle="round"
+        borderColor="cyan"
+        flexDirection="column"
+        flexGrow={17.5}
+        marginBottom={1}
+        width="100%"
+      >
+        <Box borderBottom={false} borderColor="cyan" paddingBottom={0} marginBottom={1}>
+          <Text bold color="cyan">🧠 AI Thinking Process</Text>
+        </Box>
+        <Box flexGrow={1} flexDirection="column" overflow="hidden" width="100%">
+          {thinking.length > 0 ? (
+            thinking.slice(-10).map((thought, i) => (
+              <Box key={i} width="100%">
+                <Text dim color="cyan" wrap="truncate">{thought}</Text>
+              </Box>
+            ))
+          ) : (
+            <Text dim color="gray">No thinking messages yet</Text>
           )}
         </Box>
       </Box>
@@ -585,12 +669,25 @@ Type your message or command to get started.`
       {activity && (
         <Box
           borderStyle="round"
-          borderColor="yellow"
+          borderColor={abortMessage ? "red" : "yellow"}
           paddingX={1}
           marginTop={1}
           marginBottom={1}
         >
-          <Text bold color="yellow">{activity}</Text>
+          <Text bold color={abortMessage ? "red" : "yellow"}>{activity}</Text>
+        </Box>
+      )}
+
+      {/* 退出提示 */}
+      {showExitHint && (
+        <Box
+          borderStyle="round"
+          borderColor="red"
+          paddingX={1}
+          marginTop={1}
+          marginBottom={1}
+        >
+          <Text bold color="red">⚠️ 再次按 Ctrl+C 或 ESC 退出程序 (1.5秒内)</Text>
         </Box>
       )}
 
@@ -617,9 +714,7 @@ Type your message or command to get started.`
 }
 
 // 启动应用
-render(<App />);
+render(<App />, {exitOnCtrlC: false});
 
-// 优雅退出
-process.on('SIGINT', () => {
-  process.exit(0);
-});
+// 注意：不在这里设置 SIGINT 处理器，因为 useInput 会处理 Ctrl+C
+// 如果在这里设置，会导致第一次 Ctrl+C 就直接退出

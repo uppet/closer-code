@@ -20,8 +20,6 @@
     "start": "npm run build:main && node dist/index.js",
     "dev": "npm run build -- --watch",
     "test": "node src/test-modules.js",
-    "test:sdk": "node test-sdk.js",
-    "test:batch": "node test-batch.js",
     "check": "node --check dist/index.js",
     "batch": "npm run build:batch && node dist/batch-cli.js"
   },
