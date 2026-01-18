@@ -10,9 +10,10 @@
 2. [核心功能对比](#2-核心功能对比)
 3. [迁移指南](#3-迁移指南)
 4. [API 使用说明](#4-api-使用说明)
-5. [最佳实践](#5-最佳实践)
-6. [常见问题](#6-常见问题)
-7. [示例代码](#7-示例代码)
+5. [扩展思考功能 (Extended Thinking)](#5-扩展思考功能-extended-thinking)
+6. [最佳实践](#6-最佳实践)
+7. [常见问题](#7-常见问题)
+8. [示例代码](#8-示例代码)
 
 ---
 
@@ -587,11 +588,177 @@ console.log('输入 tokens:', message.usage.input_tokens);
 console.log('输出 tokens:', message.usage.output_tokens);
 ```
 
+### 4.6 扩展思考功能 (Extended Thinking)
+
+#### 什么是 Extended Thinking？
+
+Extended Thinking 是 Claude 的高级功能，允许模型在生成最终答案之前进行深度思考。当启用此功能时：
+
+- 模型会使用指定的 token 预算进行内部推理
+- 响应中会包含 `thinking` 内容块，展示模型的思考过程
+- 适用于复杂问题解决、代码分析、逻辑推理等场景
+
+#### 基础用法
+
+```typescript
+const message = await client.messages.create({
+  model: 'claude-sonnet-4-5-20250929',
+  max_tokens: 3200,
+  // 启用扩展思考
+  thinking: {
+    type: 'enabled',
+    budget_tokens: 1600  // 为思考过程分配的 token 数量
+  },
+  messages: [{
+    role: 'user',
+    content: '分析这个复杂的算法问题：...'
+  }]
+});
+
+// 解析响应
+for (const block of message.content) {
+  if (block.type === 'thinking') {
+    console.log('思考过程:', block.thinking);
+    console.log('签名:', block.signature);
+  } else if (block.type === 'text') {
+    console.log('最终答案:', block.text);
+  }
+}
+```
+
+**重要参数说明**：
+- `budget_tokens`: 思考过程的 token 预算
+  - 最小值：1024 tokens
+  - 必须小于 `max_tokens`
+  - 包含在 `max_tokens` 限制内
+- `type`: 设置为 `'enabled'` 启用功能
+
+#### 流式响应中使用 Thinking
+
+```typescript
+const stream = client.messages.stream({
+  model: 'claude-sonnet-4-5-20250929',
+  max_tokens: 3200,
+  thinking: {
+    type: 'enabled',
+    budget_tokens: 1600
+  },
+  messages: [{
+    role: 'user',
+    content: '解释量子纠缠的原理'
+  }]
+})
+  .on('thinking', (thinking) => {
+    // 实时接收思考内容
+    process.stdout.write(thinking);
+  })
+  .on('text', (text) => {
+    // 接收最终答案
+    process.stdout.write(text);
+  })
+  .on('signature', (signature) => {
+    // 接收思考内容的签名
+    console.log('\n签名:', signature);
+  })
+  .on('error', (error) => {
+    console.error('错误:', error);
+  });
+
+const finalMessage = await stream.finalMessage();
+console.log('\n完整消息:', finalMessage);
+```
+
+#### 状态跟踪示例
+
+```typescript
+let thinkingState = 'not-started';
+
+const stream = client.messages.stream({
+  model: 'claude-sonnet-4-5-20250929',
+  max_tokens: 3200,
+  thinking: { type: 'enabled', budget_tokens: 1600 },
+  messages: [{ role: 'user', content: '你的问题' }]
+})
+  .on('thinking', (thinking) => {
+    if (thinkingState === 'not-started') {
+      console.log('思考过程:\n---------');
+      thinkingState = 'started';
+    }
+    process.stdout.write(thinking);
+  })
+  .on('text', (text) => {
+    if (thinkingState !== 'finished') {
+      console.log('\n\n最终答案:\n-----');
+      thinkingState = 'finished';
+    }
+    process.stdout.write(text);
+  });
+
+await stream.finalMessage();
+```
+
+#### 使用场景建议
+
+**适合使用 Extended Thinking 的场景**：
+1. **复杂问题分析**：需要多步推理的问题
+2. **代码审查**：深入分析代码逻辑和潜在问题
+3. **架构设计**：权衡不同技术方案的优劣
+4. **调试协助**：分析复杂 bug 的根本原因
+5. **算法优化**：分析和改进算法效率
+
+**不推荐使用的场景**：
+1. 简单问答（会增加成本和延迟）
+2. 创意写作（思考内容可能对最终输出帮助有限）
+3. 实时性要求极高的场景
+
+#### 成本优化建议
+
+```typescript
+// 根据问题复杂度动态调整 thinking budget
+function calculateThinkingBudget(complexity: 'low' | 'medium' | 'high'): number {
+  const budgets = {
+    low: 1024,      // 简单问题
+    medium: 2048,   // 中等复杂度
+    high: 4096      // 复杂问题
+  };
+  return budgets[complexity];
+}
+
+const message = await client.messages.create({
+  model: 'claude-sonnet-4-5-20250929',
+  max_tokens: 8192,
+  thinking: {
+    type: 'enabled',
+    budget_tokens: calculateThinkingBudget('high')
+  },
+  messages: [{ role: 'user', content: complexQuestion }]
+});
+```
+
+#### 禁用 Thinking
+
+```typescript
+// 默认情况下，thinking 是禁用的
+const message = await client.messages.create({
+  model: 'claude-sonnet-4-5-20250929',
+  max_tokens: 1024,
+  messages: [{ role: 'user', content: '简单问题' }]
+});
+
+// 或者显式禁用
+const message2 = await client.messages.create({
+  model: 'claude-sonnet-4-5-20250929',
+  max_tokens: 1024,
+  thinking: { type: 'disabled' },
+  messages: [{ role: 'user', content: '简单问题' }]
+});
+```
+
 ---
 
-## 5. 最佳实践
+## 6. 最佳实践
 
-### 5.1 错误处理
+### 6.1 错误处理
 
 ```typescript
 import {
@@ -618,7 +785,7 @@ try {
 }
 ```
 
-### 5.2 重试策略
+### 6.2 重试策略
 
 SDK 内置自动重试，但可以自定义：
 
@@ -630,7 +797,7 @@ const client = new Anthropic({
 });
 ```
 
-### 5.3 性能优化
+### 6.3 性能优化
 
 #### 1. 使用缓存
 
@@ -685,7 +852,7 @@ for await (const result of results) {
 }
 ```
 
-### 5.4 安全性
+### 6.4 安全性
 
 #### 1. API 密钥管理
 
@@ -724,9 +891,9 @@ const message = await client.messages.create({
 
 ---
 
-## 6. 常见问题
+## 7. 常见问题
 
-### 6.1 如何处理超长对话？
+### 7.1 如何处理超长对话？
 
 **问题**：对话历史很长，导致 token 超限。
 
@@ -753,7 +920,7 @@ function slidingWindow(messages: Anthropic.MessageParam[], maxMessages = 10) {
 }
 ```
 
-### 6.2 如何实现多轮对话？
+### 7.2 如何实现多轮对话？
 
 ```typescript
 class Conversation {
@@ -792,7 +959,7 @@ await chat.say('什么是 TypeScript？');
 await chat.say('能给我一个例子吗？');
 ```
 
-### 6.3 如何处理并发请求？
+### 7.3 如何处理并发请求？
 
 ```typescript
 // 使用 Promise.all 并行处理
@@ -815,7 +982,7 @@ const results = await Promise.all(
 // 或者使用 Message Batches API（更适合大量请求）
 ```
 
-### 6.4 如何调试 API 调用？
+### 7.4 如何调试 API 调用？
 
 ```typescript
 // 启用详细日志
@@ -838,9 +1005,9 @@ console.log('请求 ID:', message.response.headers.get('request-id'));
 
 ---
 
-## 7. 示例代码
+## 8. 示例代码
 
-### 7.1 代码助手（完整示例）
+### 8.1 代码助手（完整示例）
 
 ```typescript
 import Anthropic from '@anthropic-ai/sdk';
@@ -898,7 +1065,7 @@ const result = await codeAssistant('请读取 src/index.js 文件并分析它的
 console.log(result.content);
 ```
 
-### 7.2 流式代码助手
+### 8.2 流式代码助手
 
 ```typescript
 async function streamingCodeAssistant(userRequest: string) {
@@ -924,7 +1091,7 @@ async function streamingCodeAssistant(userRequest: string) {
 }
 ```
 
-### 7.3 交互式对话
+### 8.3 交互式对话
 
 ```typescript
 import * as readline from 'readline';
@@ -985,9 +1152,231 @@ async function interactiveChat() {
 interactiveChat();
 ```
 
----
+### 8.4 智能代码审查助手（使用 Extended Thinking）
 
-## 总结
+这是一个展示如何使用 Extended Thinking 功能进行深度代码分析的完整示例：
+
+```typescript
+import Anthropic from '@anthropic-ai/sdk';
+import { betaZodTool } from '@anthropic-ai/sdk/helpers/beta/zod';
+import { z } from 'zod';
+
+const client = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY
+});
+
+// 定义代码分析工具
+const analyzeFileTool = betaZodTool({
+  name: 'analyze_file',
+  description: '读取并分析代码文件',
+  inputSchema: z.object({
+    filePath: z.string().describe('文件路径'),
+    analysisType: z.enum(['security', 'performance', 'readability', 'all'])
+      .describe('分析类型')
+  }),
+  run: async (input) => {
+    const fs = await import('fs/promises');
+    try {
+      const content = await fs.readFile(input.filePath, 'utf-8');
+      return {
+        success: true,
+        file: input.filePath,
+        content: content.slice(0, 5000), // 限制长度
+        analysisType: input.analysisType
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: (error as Error).message
+      };
+    }
+  }
+});
+
+// 代码审查助手类
+class CodeReviewAssistant {
+  private client: Anthropic;
+  private model: string;
+
+  constructor() {
+    this.client = new Anthropic({
+      apiKey: process.env.ANTHROPIC_API_KEY
+    });
+    this.model = 'claude-sonnet-4-5-20250929';
+  }
+
+  // 使用 Extended Thinking 进行深度分析
+  async deepAnalysis(userRequest: string, complexity: 'low' | 'medium' | 'high' = 'high') {
+    const thinkingBudgets = {
+      low: 1024,
+      medium: 2048,
+      high: 4096
+    };
+
+    console.log(`\n=== 开始深度分析 (Thinking Budget: ${thinkingBudgets[complexity]} tokens) ===\n`);
+
+    let thinkingState = 'not-started';
+    let thinkingContent = '';
+
+    const stream = this.client.messages.stream({
+      model: this.model,
+      max_tokens: 8192,
+      thinking: {
+        type: 'enabled',
+        budget_tokens: thinkingBudgets[complexity]
+      },
+      system: `你是一个专业的代码审查专家。当分析代码时，你会：
+1. 仔细阅读并理解代码逻辑
+2. 识别潜在的安全漏洞
+3. 分析性能问题
+4. 提出改进建议
+5. 解释你的推理过程`,
+      messages: [{ role: 'user', content: userRequest }],
+      tools: [analyzeFileTool]
+    })
+      .on('thinking', (thinking) => {
+        if (thinkingState === 'not-started') {
+          console.log('🤔 深度思考中...\n---');
+          thinkingState = 'started';
+        }
+        thinkingContent += thinking;
+        process.stdout.write(thinking);
+      })
+      .on('text', (text) => {
+        if (thinkingState !== 'finished') {
+          console.log('\n\n---\n✅ 分析结果:\n---');
+          thinkingState = 'finished';
+        }
+        process.stdout.write(text);
+      })
+      .on('toolUse', (toolUse) => {
+        console.log('\n\n🔧 使用工具:', toolUse.name);
+        console.log('参数:', JSON.stringify(toolUse.input, null, 2));
+      })
+      .on('error', (error) => {
+        console.error('\n❌ 错误:', error);
+      });
+
+    const finalMessage = await stream.finalMessage();
+
+    console.log('\n\n=== 分析完成 ===');
+    console.log(`思考内容长度: ${thinkingContent.length} 字符`);
+    console.log(`Token 使用: 输入=${finalMessage.usage.input_tokens}, 输出=${finalMessage.usage.output_tokens}`);
+
+    return {
+      finalMessage,
+      thinkingContent
+    };
+  }
+
+  // 快速分析（不使用 Extended Thinking）
+  async quickAnalysis(userRequest: string) {
+    console.log('\n=== 快速分析模式 ===\n');
+
+    const finalMessage = await this.client.beta.messages.toolRunner({
+      model: this.model,
+      max_tokens: 4096,
+      system: '你是一个代码审查助手，快速检查代码问题。',
+      messages: [{ role: 'user', content: userRequest }],
+      tools: [analyzeFileTool]
+    });
+
+    console.log('✅ 快速分析完成');
+    console.log(`Token 使用: 输入=${finalMessage.usage.input_tokens}, 输出=${finalMessage.usage.output_tokens}`);
+
+    return finalMessage;
+  }
+}
+
+// 使用示例
+async function main() {
+  const assistant = new CodeReviewAssistant();
+
+  // 示例 1: 深度分析复杂代码
+  console.log('\n【示例 1: 深度安全分析】');
+  await assistant.deepAnalysis(
+    '请对 src/auth/login.ts 进行全面的安全分析，特别关注SQL注入、XSS和认证漏洞',
+    'high'
+  );
+
+  // 等待用户输入
+  await new Promise(resolve => setTimeout(resolve, 2000));
+
+  // 示例 2: 快速代码审查
+  console.log('\n\n【示例 2: 快速代码审查】');
+  await assistant.quickAnalysis('检查 src/utils/helpers.ts 中是否有明显的性能问题');
+
+  // 示例 3: 流式深度分析
+  console.log('\n\n【示例 3: 架构设计分析】');
+  const result = await assistant.deepAnalysis(
+    '分析当前项目的架构设计，评估可扩展性和维护性，并提供重构建议',
+    'high'
+  );
+
+  // 保存分析结果
+  if (result.thinkingContent) {
+    console.log('\n💡 提示: 思考过程已保存到 result.thinkingContent');
+  }
+}
+
+// 运行示例
+if (require.main === module) {
+  main().catch(console.error);
+}
+
+export { CodeReviewAssistant };
+```
+
+#### 实际运行效果
+
+```bash
+$ npm run code-review
+
+=== 开始深度分析 (Thinking Budget: 4096 tokens) ===
+
+🤔 深度思考中...
+---
+让我分析这段代码...
+
+首先，我需要理解认证流程：
+1. 用户提交登录表单
+2. 验证用户名和密码
+3. 生成会话令牌
+
+在安全方面，我注意到：
+- 密码应该使用哈希存储
+- 需要防止暴力破解
+- 应该实现速率限制
+
+让我继续分析...
+---
+✅ 分析结果:
+---
+基于我的分析，我发现了以下安全问题：
+
+1. **SQL 注入风险**: 在第 45 行，查询字符串拼接存在风险...
+2. **会话管理**: 建议使用 HTTP-only cookies...
+3. **速率限制**: 建议添加登录尝试限制...
+
+=== 分析完成 ===
+思考内容长度: 1243 字符
+Token 使用: 输入=3456, 输出=789
+```
+
+#### 关键特性
+
+1. **智能复杂度判断**: 根据问题类型自动调整 thinking budget
+2. **实时反馈**: 流式展示思考过程，提升用户体验
+3. **工具集成**: 结合文件读取工具进行实际分析
+4. **成本优化**: 对简单问题使用快速分析模式
+
+#### 使用建议
+
+- **复杂任务**: 使用 `high` 复杂度和较大的 thinking budget (4096+)
+- **中等任务**: 使用 `medium` 复杂度 (2048 tokens)
+- **简单任务**: 考虑使用快速分析模式以节省成本
+
+---
 
 使用 `@anthropic-ai/sdk` 的核心优势：
 
@@ -997,6 +1386,8 @@ interactiveChat();
 4. **流式响应简化**：无需手动解析 SSE
 5. **工具执行自动化**：toolRunner 自动处理工具调用
 6. **更好的性能**：优化的网络请求和缓存支持
+7. **Extended Thinking 支持**：深度思考功能，解决复杂问题
+8. **实时思考过程**：流式展示模型的推理过程
 
 开始迁移建议：
 - ✅ 从新功能开始使用 SDK
@@ -1006,9 +1397,13 @@ interactiveChat();
 
 ---
 
-**文档版本**: 1.0.0
-**最后更新**: 2025-01-17
+**文档版本**: 1.1.0
+**最后更新**: 2025-01-18
 **维护者**: Closer Code 团队
+
+**更新记录**:
+- v1.1.0 (2025-01-18): 新增 Extended Thinking 功能完整说明和示例
+- v1.0.0 (2025-01-17): 初始版本，涵盖基础 API 使用
 
 **参考资源**:
 - [Anthropic TypeScript SDK 完整文档](../ref_repo/anthropic-sdk-typescript/api.md)

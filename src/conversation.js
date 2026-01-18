@@ -119,15 +119,39 @@ export class Conversation {
     const projectKey = this.config.behavior.workingDir || 'default';
     const projectInfo = memory.projects?.[projectKey];
 
-    // 读取 cloco.md 文件内容
-    let clocoContent = '';
+    // 读取全局 cloco.md 文件内容
+    let globalClocoContent = '';
+    try {
+      const fs = await import('fs/promises');
+      const path = await import('path');
+      const os = await import('os');
+
+      // 获取用户主目录
+      const homeDir = os.homedir();
+      const globalClocoPath = path.join(homeDir, '.closer-code', 'cloco.md');
+
+      globalClocoContent = await fs.readFile(globalClocoPath, 'utf-8');
+      console.log('✅ 已加载全局行为规范: ~/.closer-code/cloco.md');
+    } catch (error) {
+      // 全局配置不存在是正常情况，不报错
+      if (error.code !== 'ENOENT') {
+        console.error('读取全局 cloco.md 失败:', error.message);
+      }
+    }
+
+    // 读取项目级 cloco.md 文件内容
+    let projectClocoContent = '';
     try {
       const fs = await import('fs/promises');
       const path = await import('path');
       const clocoPath = path.join(process.cwd(), 'cloco.md');
-      clocoContent = await fs.readFile(clocoPath, 'utf-8');
+      projectClocoContent = await fs.readFile(clocoPath, 'utf-8');
+      console.log('✅ 已加载项目行为规范: ./cloco.md');
     } catch (error) {
-      console.error('Failed to read cloco.md:', error.message);
+      // 项目配置不存在是正常情况，不报错
+      if (error.code !== 'ENOENT') {
+        console.error('读取项目 cloco.md 失败:', error.message);
+      }
     }
 
     // SDK 版本的系统提示 - 移除了工具调用格式的说明
@@ -294,12 +318,30 @@ ${JSON.stringify(projectInfo.patterns, null, 2)}
 
 **Remember: Use tools proactively. Complete ALL steps of multi-step tasks before reporting results.**
 
+${globalClocoContent ? `
+## 📋 Global Behavior Guidelines (CRITICAL)
+**The following global guidelines from ~/.closer-code/cloco.md are EXTREMELY IMPORTANT and MUST be followed:**
+
+${globalClocoContent}
+
+**These global guidelines take precedence over general instructions. Follow them carefully**
+` : ''}
+
+${projectClocoContent ? `
 ## 📋 Project Behavior Guidelines (CRITICAL)
-**The following guidelines from cloco.md are EXTREMELY IMPORTANT and MUST be followed, . No matter they were written in any language:**
+**The following project-specific guidelines from ./cloco.md are EXTREMELY IMPORTANT and MUST be followed:**
 
-${clocoContent || 'No project-specific guidelines available.'}
+${projectClocoContent}
 
-**These guidelines take precedence over general instructions. Follow them carefully**`
+**These project guidelines take precedence over general instructions. Follow them carefully**
+` : ''}
+
+${!globalClocoContent && !projectClocoContent ? `
+## 📋 Behavior Guidelines
+No custom behavior guidelines found. You can add them by:
+- Creating ~/.closer-code/cloco.md for global guidelines
+- Creating ./cloco.md for project-specific guidelines
+` : ''}`
 + (this.workflowTest ? WORKFLOW_SYSTEM_PROMPT : '');
   }
 
@@ -353,16 +395,26 @@ ${clocoContent || 'No project-specific guidelines available.'}
         const toolUseBlocks = response.content.filter(block => block.type === 'tool_use');
 
         if (toolUseBlocks.length === 0) {
-          // 没有工具调用，先提取 thinking 内容，再提取文本内容
-          const thinkingBlocks = response.content.filter(block => block.type === 'thinking');
+          // 没有工具调用，先提取 thinking 相关内容，再提取文本内容
+          const thinkingBlocks = response.content.filter(block =>
+            block.type === 'thinking' || block.type === 'redacted_thinking'
+          );
 
-          // 发送 thinking 内容到 UI
+          // 发送 thinking 内容到 UI（符合官方示例）
           if (thinkingBlocks.length > 0 && typeof onProgress === 'function') {
             for (const block of thinkingBlocks) {
-              onProgress({
-                type: 'thinking',
-                content: block.thinking
-              });
+              if (block.type === 'thinking') {
+                onProgress({
+                  type: 'thinking',
+                  content: block.thinking,
+                  signature: block.signature
+                });
+              } else if (block.type === 'redacted_thinking') {
+                onProgress({
+                  type: 'thinking_redacted',
+                  content: block.data
+                });
+              }
             }
           }
 
@@ -468,14 +520,25 @@ ${clocoContent || 'No project-specific guidelines available.'}
       let textContent = fullTextContent;
 
       if (!textContent && lastMessage?.content) {
-        // 先提取 thinking 内容
-        const thinkingBlocks = lastMessage.content.filter(block => block.type === 'thinking');
+        // 先提取 thinking 相关内容（包括 thinking 和 redacted_thinking）
+        const thinkingBlocks = lastMessage.content.filter(block =>
+          block.type === 'thinking' || block.type === 'redacted_thinking'
+        );
+
         if (thinkingBlocks.length > 0 && typeof onProgress === 'function') {
           for (const block of thinkingBlocks) {
-            onProgress({
-              type: 'thinking',
-              content: block.thinking
-            });
+            if (block.type === 'thinking') {
+              onProgress({
+                type: 'thinking',
+                content: block.thinking,
+                signature: block.signature
+              });
+            } else if (block.type === 'redacted_thinking') {
+              onProgress({
+                type: 'thinking_redacted',
+                content: block.data
+              });
+            }
           }
         }
 
@@ -545,36 +608,31 @@ ${clocoContent || 'No project-specific guidelines available.'}
           tools: tools
         },
         (chunk) => {
-          // 处理流式响应块
-          if (typeof onProgress === 'function') {
-            onProgress({
-              type: 'chunk',
-              chunk: chunk
-            });
-          }
-
-          // 处理 thinking 事件
-          if (chunk.type === 'content_block_delta' && chunk.delta?.thinking) {
+          // 处理 thinking 事件（使用 SDK 事件监听器 API）
+          if (chunk.type === 'thinking') {
             if (typeof onProgress === 'function') {
               onProgress({
                 type: 'thinking',
-                content: chunk.delta.thinking
+                content: chunk.delta,      // 增量内容
+                snapshot: chunk.snapshot   // 完整快照
               });
             }
           }
-          // 收集响应内容
-          else if (chunk.type === 'content_block_delta' && chunk.delta?.text) {
+          // 处理 signature 事件（thinking 签名）
+          else if (chunk.type === 'signature') {
+            if (typeof onProgress === 'function') {
+              onProgress({
+                type: 'thinking_signature',
+                signature: chunk.signature
+              });
+            }
+          }
+          // 处理文本事件
+          else if (chunk.type === 'text') {
             if (typeof onProgress === 'function') {
               onProgress({
                 type: 'token',
-                content: chunk.delta.text
-              });
-            }
-          } else if (chunk.type === 'message_stop') {
-            if (typeof onProgress === 'function') {
-              onProgress({
-                type: 'done',
-                message: chunk.message
+                content: chunk.delta
               });
             }
           }

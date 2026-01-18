@@ -2,7 +2,7 @@
 /**
  * Thinking 功能验证测试
  *
- * 验证 AI thinking 功能是否正确实现
+ * 验证 AI thinking 功能是否正确实现（符合 SDK Extended Thinking 规范）
  */
 
 import fs from 'fs/promises';
@@ -35,8 +35,11 @@ async function verifySourceCode() {
   const aiClientPath = path.join(process.cwd(), 'src', 'ai-client.js');
   const aiClientContent = await fs.readFile(aiClientPath, 'utf-8');
 
-  const hasThinkingInChat = /thinking:\s*options\.thinking/.test(aiClientContent) || /thinking:/.test(aiClientContent);
-  const hasThinkingInStream = /thinking:\s*options\.thinking/.test(aiClientContent) || /thinking:/.test(aiClientContent);
+  const hasThinkingInChat = /thinking:/.test(aiClientContent);
+  const hasStreamEventListener = /stream\.on\('thinking'/.test(aiClientContent);
+  const hasTextEventListener = /stream\.on\('text'/.test(aiClientContent);
+  const hasSignatureEventListener = /stream\.on\('signature'/.test(aiClientContent);
+  const hasFinalMessage = /finalMessage/.test(aiClientContent);
 
   checks.push({
     file: 'ai-client.js',
@@ -45,20 +48,41 @@ async function verifySourceCode() {
   });
   checks.push({
     file: 'ai-client.js',
-    check: 'chatStream 方法中的 thinking 配置',
-    success: hasThinkingInStream
+    check: '使用 stream.on("thinking") 事件监听器',
+    success: hasStreamEventListener
+  });
+  checks.push({
+    file: 'ai-client.js',
+    check: '使用 stream.on("text") 事件监听器',
+    success: hasTextEventListener
+  });
+  checks.push({
+    file: 'ai-client.js',
+    check: '使用 stream.on("signature") 事件监听器',
+    success: hasSignatureEventListener
+  });
+  checks.push({
+    file: 'ai-client.js',
+    check: '使用 stream.finalMessage() 获取最终消息',
+    success: hasFinalMessage
   });
 
   log(`  ${hasThinkingInChat ? '✓' : '✗'} chat 方法中的 thinking 配置`, hasThinkingInChat ? 'green' : 'red');
-  log(`  ${hasThinkingInStream ? '✓' : '✗'} chatStream 方法中的 thinking 配置`, hasThinkingInStream ? 'green' : 'red');
+  log(`  ${hasStreamEventListener ? '✓' : '✗'} 使用 stream.on("thinking") 事件监听器`, hasStreamEventListener ? 'green' : 'red');
+  log(`  ${hasTextEventListener ? '✓' : '✗'} 使用 stream.on("text") 事件监听器`, hasTextEventListener ? 'green' : 'red');
+  log(`  ${hasSignatureEventListener ? '✓' : '✗'} 使用 stream.on("signature") 事件监听器`, hasSignatureEventListener ? 'green' : 'red');
+  log(`  ${hasFinalMessage ? '✓' : '✗'} 使用 stream.finalMessage() 获取最终消息`, hasFinalMessage ? 'green' : 'red');
 
   // 2. 检查 conversation.js
   log('\n2. 检查 conversation.js', 'yellow');
   const conversationPath = path.join(process.cwd(), 'src', 'conversation.js');
   const conversationContent = await fs.readFile(conversationPath, 'utf-8');
 
-  const hasThinkingHandler = /type:\s*['"]thinking['"]/.test(conversationContent) || /thinking/.test(conversationContent);
-  const hasThinkingDeltaCheck = /delta\?\.thinking/.test(conversationContent) || /thinking/.test(conversationContent);
+  const hasThinkingHandler = /type:\s*['"]thinking['"]/.test(conversationContent);
+  const hasSnapshotInStream = /chunk\.snapshot/.test(conversationContent);
+  const hasSignatureHandler = /thinking_signature/.test(conversationContent);
+  const hasRedactedHandler = /thinking_redacted/.test(conversationContent);
+  const hasRedactedThinkingBlock = /redacted_thinking/.test(conversationContent);
 
   checks.push({
     file: 'conversation.js',
@@ -67,12 +91,30 @@ async function verifySourceCode() {
   });
   checks.push({
     file: 'conversation.js',
-    check: 'thinking delta 检查',
-    success: hasThinkingDeltaCheck
+    check: '流式模式中的 snapshot 支持',
+    success: hasSnapshotInStream
+  });
+  checks.push({
+    file: 'conversation.js',
+    check: 'thinking signature 处理',
+    success: hasSignatureHandler
+  });
+  checks.push({
+    file: 'conversation.js',
+    check: 'redacted thinking 处理',
+    success: hasRedactedHandler
+  });
+  checks.push({
+    file: 'conversation.js',
+    check: '提取 redacted_thinking 块',
+    success: hasRedactedThinkingBlock
   });
 
   log(`  ${hasThinkingHandler ? '✓' : '✗'} thinking 事件处理`, hasThinkingHandler ? 'green' : 'red');
-  log(`  ${hasThinkingDeltaCheck ? '✓' : '✗'} thinking delta 检查`, hasThinkingDeltaCheck ? 'green' : 'red');
+  log(`  ${hasSnapshotInStream ? '✓' : '✗'} 流式模式中的 snapshot 支持`, hasSnapshotInStream ? 'green' : 'red');
+  log(`  ${hasSignatureHandler ? '✓' : '✗'} thinking signature 处理`, hasSignatureHandler ? 'green' : 'red');
+  log(`  ${hasRedactedHandler ? '✓' : '✗'} redacted thinking 处理`, hasRedactedHandler ? 'green' : 'red');
+  log(`  ${hasRedactedThinkingBlock ? '✓' : '✗'} 提取 redacted_thinking 块`, hasRedactedThinkingBlock ? 'green' : 'red');
 
   // 3. 检查 closer-cli.jsx
   log('\n3. 检查 closer-cli.jsx', 'yellow');
@@ -82,6 +124,9 @@ async function verifySourceCode() {
   const hasThinkingProgressHandler = /progress\.type\s*===?\s*['"]thinking['"]/.test(cliContent);
   const hasThinkingState = /setThinking/.test(cliContent);
   const hasThinkingUI = /AI Thinking Process/.test(cliContent);
+  const hasSnapshotUsage = /progress\.snapshot/.test(cliContent);
+  const hasSignatureUIHandler = /thinking_signature/.test(cliContent);
+  const hasRedactedUIHandler = /thinking_redacted/.test(cliContent);
 
   checks.push({
     file: 'closer-cli.jsx',
@@ -98,10 +143,28 @@ async function verifySourceCode() {
     check: 'thinking UI 区域',
     success: hasThinkingUI
   });
+  checks.push({
+    file: 'closer-cli.jsx',
+    check: '使用 snapshot 避免重复',
+    success: hasSnapshotUsage
+  });
+  checks.push({
+    file: 'closer-cli.jsx',
+    check: 'signature 事件处理',
+    success: hasSignatureUIHandler
+  });
+  checks.push({
+    file: 'closer-cli.jsx',
+    check: 'redacted thinking 处理',
+    success: hasRedactedUIHandler
+  });
 
   log(`  ${hasThinkingProgressHandler ? '✓' : '✗'} thinking 进度处理`, hasThinkingProgressHandler ? 'green' : 'red');
   log(`  ${hasThinkingState ? '✓' : '✗'} thinking 状态更新`, hasThinkingState ? 'green' : 'red');
   log(`  ${hasThinkingUI ? '✓' : '✗'} thinking UI 区域`, hasThinkingUI ? 'green' : 'red');
+  log(`  ${hasSnapshotUsage ? '✓' : '✗'} 使用 snapshot 避免重复`, hasSnapshotUsage ? 'green' : 'red');
+  log(`  ${hasSignatureUIHandler ? '✓' : '✗'} signature 事件处理`, hasSignatureUIHandler ? 'green' : 'red');
+  log(`  ${hasRedactedUIHandler ? '✓' : '✗'} redacted thinking 处理`, hasRedactedUIHandler ? 'green' : 'red');
 
   return checks;
 }
@@ -122,7 +185,9 @@ async function verifyCompiledCode() {
     'thinking',
     'AI Thinking Process',
     'budget_tokens',
-    'enabled'
+    'enabled',
+    'snapshot',
+    'signature'
   ];
 
   for (const keyword of keywords) {
@@ -226,7 +291,7 @@ async function generateReport(allChecks) {
  */
 async function main() {
   log('='.repeat(70), 'cyan');
-  log('AI Thinking 功能验证测试', 'cyan');
+  log('AI Thinking 功能验证测试（符合 SDK Extended Thinking 规范）', 'cyan');
   log('='.repeat(70), 'cyan');
 
   try {

@@ -40,32 +40,68 @@ export class AnthropicClient {
       messages: messages,  // SDK 自动处理格式转换
       tools: options.tools,
       temperature: options.temperature,
-      thinking: options.thinking || { type: 'enabled', budget_tokens: 1600 }
+      thinking: options.thinking || { type: 'enabled', budget_tokens: 20000 }
     });
   }
 
   /**
    * 发送消息（流式）
+   * 使用 SDK 的事件监听器 API，符合 Extended Thinking 官方示例
+   *
    * @param {Array} messages - 消息数组
    * @param {Object} options - 选项
    * @param {Function} onChunk - 流式回调函数
+   * @returns {Promise} 最终消息
    */
   async chatStream(messages, options = {}, onChunk) {
-    const stream = await this.client.messages.create({
+    const stream = this.client.messages.stream({
       model: this.model,
       max_tokens: this.maxTokens,
       system: options.system,
       messages: messages,
       tools: options.tools,
       temperature: options.temperature,
-      stream: true,
-      thinking: options.thinking || { type: 'enabled', budget_tokens: 1600 }
+      thinking: options.thinking || { type: 'enabled', budget_tokens: 20000 }
     });
 
-    // SDK 自动处理 SSE 解析
-    for await (const event of stream) {
-      onChunk(event);
-    }
+    // 使用 SDK 的事件监听器 API（官方推荐方式）
+    // 参考: examples/thinking-stream.ts
+    stream.on('thinking', (thinkingDelta, thinkingSnapshot) => {
+      // thinkingDelta: 增量的 thinking 内容
+      // thinkingSnapshot: 完整的 thinking 内容快照
+      if (typeof onChunk === 'function') {
+        onChunk({
+          type: 'thinking',
+          delta: thinkingDelta,
+          snapshot: thinkingSnapshot
+        });
+      }
+    });
+
+    stream.on('text', (textDelta, textSnapshot) => {
+      // textDelta: 增量的文本内容
+      // textSnapshot: 完整的文本内容快照
+      if (typeof onChunk === 'function') {
+        onChunk({
+          type: 'text',
+          delta: textDelta,
+          snapshot: textSnapshot
+        });
+      }
+    });
+
+    stream.on('signature', (signature) => {
+      // signature: thinking 块的签名
+      if (typeof onChunk === 'function') {
+        onChunk({
+          type: 'signature',
+          signature: signature
+        });
+      }
+    });
+
+    // 获取最终消息
+    return await stream.finalMessage();
   }
 
   /**

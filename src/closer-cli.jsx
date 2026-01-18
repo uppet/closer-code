@@ -350,19 +350,46 @@ Type your message or command to get started.`
       const response = await conversation.sendMessage(
         value,
         (progress) => {
-          // 处理流式响应
+          // 处理流式响应（使用 SDK 事件监听器 API）
           if (progress.type === 'thinking') {
-            // AI thinking 内容
+            // AI thinking 内容（使用完整快照）
             setActivity('🤔 AI 正在深度思考...');
             setThinking(prev => {
               const newThinking = [...prev];
-              // 更新最后一条 thinking 或添加新的一条
-              if (newThinking.length > 0 && newThinking[newThinking.length - 1].startsWith('🤔')) {
-                newThinking[newThinking.length - 1] = `🤔 [${new Date().toLocaleTimeString()}] ${progress.content}`;
-              } else {
-                newThinking.push(`🤔 [${new Date().toLocaleTimeString()}] ${progress.content}`);
+              // 使用 snapshot（完整快照）而不是 delta（增量）
+              // 这样可以避免重复内容
+              const thinkingContent = progress.snapshot || progress.content;
+              const lastEntry = `🤔 [${new Date().toLocaleTimeString()}] ${thinkingContent}`;
+
+              // 检查最后一条是否相同，避免重复
+              if (newThinking.length === 0 || newThinking[newThinking.length - 1] !== lastEntry) {
+                newThinking.push(lastEntry);
               }
-              return newThinking.slice(-10); // 只保留最后 10 条
+
+              return newThinking.slice(-30); // 保留最后 30 条thinking记录
+            });
+          } else if (progress.type === 'thinking_signature') {
+            // Thinking 签名
+            setThinking(prev => {
+              const newThinking = [...prev];
+              // 计算累计的thinking内容长度
+              const totalThinkingLength = prev
+                .filter(entry => entry.startsWith('🤔'))
+                .reduce((sum, entry) => {
+                  // 提取thinking内容（去掉时间戳前缀）
+                  const content = entry.replace(/^🤔 \[.*?\] /, '');
+                  return sum + content.length;
+                }, 0);
+              
+              newThinking.push(`✅ [${new Date().toLocaleTimeString()}] Thinking 完成 (${totalThinkingLength} 字符, ~${Math.ceil(totalThinkingLength/4)} tokens)`);
+              return newThinking.slice(-30);
+            });
+          } else if (progress.type === 'thinking_redacted') {
+            // Redacted thinking（被编辑的思考内容）
+            setThinking(prev => {
+              const newThinking = [...prev];
+              newThinking.push(`🔒 [${new Date().toLocaleTimeString()}] Redacted thinking: ${progress.content}`);
+              return newThinking.slice(-10);
             });
           } else if (progress.type === 'token') {
             setActivity('✍️ AI 正在输入...');
