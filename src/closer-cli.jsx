@@ -37,29 +37,6 @@ function Panel({ title, children, borderColor = 'gray', flex = 1 }) {
 }
 
 // 消息显示组件
-function MessageItem({ message }) {
-  const isUser = message.role === 'user';
-  const isSystem = message.role === 'system';
-  const isError = message.role === 'error';
-
-  const color = isUser ? 'cyan' : isError ? 'red' : isSystem ? 'yellow' : 'white';
-  const prefix = isUser ? '👤 ' : isError ? '❌ ' : isSystem ? 'ℹ️ ' : '🤖 ';
-  const content = typeof message.content === 'string'
-    ? message.content
-    : JSON.stringify(message.content);
-
-  return (
-    <Box marginBottom={1} flexDirection="column" width="100%">
-      <Box width="100%">
-        <Text dim color={color}>
-          {prefix}
-        </Text>
-        <Text color={color} wrap="wrap">{content}</Text>
-      </Box>
-    </Box>
-  );
-}
-
 // 任务进度组件
 function TaskProgress({ plan }) {
   if (!plan) return null;
@@ -155,6 +132,88 @@ function ToolExecution({ tool, input, result }) {
   );
 }
 
+/**
+ * 将消息格式化为行数组
+ * @param {Object} message - 消息对象
+ * @param {number} maxWidth - 最大宽度（字符数）
+ * @returns {Array} - 行数组
+ */
+function formatMessageAsLines(message, maxWidth = 80) {
+  const isUser = message.role === 'user';
+  const isSystem = message.role === 'system';
+  const isError = message.role === 'error';
+
+  const color = isUser ? 'cyan' : isError ? 'red' : isSystem ? 'yellow' : 'white';
+  const prefix = isUser ? '👤 ' : isError ? '❌ ' : isSystem ? 'ℹ️ ' : '🤖 ';
+  const content = typeof message.content === 'string'
+    ? message.content
+    : JSON.stringify(message.content);
+
+  const lines = [];
+  const prefixLength = 4; // emoji + space
+  const contentWidth = maxWidth - prefixLength - 2; // 留出边距
+
+  // 添加前缀行
+  lines.push({
+    text: prefix,
+    color: color,
+    type: 'prefix'
+  });
+
+  // 分割内容为行
+  const contentLines = content.split('\n');
+
+  for (let line of contentLines) {
+    // 如果行太长，需要分割
+    if (line.length > contentWidth) {
+      // 分割长行
+      for (let i = 0; i < line.length; i += contentWidth) {
+        const chunk = line.slice(i, i + contentWidth);
+        lines.push({
+          text: '  ' + chunk, // 缩进
+          color: color,
+          type: 'content'
+        });
+      }
+    } else {
+      lines.push({
+        text: '  ' + (line || ''), // 缩进，空行也显示
+        color: color,
+        type: 'content'
+      });
+    }
+  }
+
+  // 添加消息间分隔
+  lines.push({
+    text: '',
+    color: 'gray',
+    type: 'separator'
+  });
+
+  return lines;
+}
+
+/**
+ * 滚动容器组件
+ */
+function ScrollContainer({ items, height, scrollPosition }) {
+  // 计算可见范围
+  const startIndex = Math.max(0, Math.floor(scrollPosition));
+  const endIndex = Math.min(items.length, startIndex + height);
+  const visibleItems = items.slice(startIndex, endIndex);
+
+  return (
+    <Box flexDirection="column" width="100%">
+      {visibleItems.map((item, index) => (
+        <Box key={startIndex + index} width="100%">
+          <Text color={item.color}>{item.text}</Text>
+        </Box>
+      ))}
+    </Box>
+  );
+}
+
 // 主应用组件
 function App() {
   const [config, setConfig] = useState(null);
@@ -167,10 +226,34 @@ function App() {
   const [status, setStatus] = useState('Initializing...');
   const [messageCounter, setMessageCounter] = useState(0);
   const [activity, setActivity] = useState(null); // 当前活动描述
-  const [logs, setLogs] = useState([]); // 日志内容
   const [thinking, setThinking] = useState([]); // AI 思考过程
-  const [scrollOffset, setScrollOffset] = useState(0); // 滚动偏移量（从底部开始）
-  const maxVisibleMessages = 15; // 最多显示15条消息
+  const [thinkingEnabled, setThinkingEnabled] = useState(true); // Thinking 开关状态
+
+  // 终端尺寸状态
+  const [terminalSize, setTerminalSize] = useState({
+    columns: process.stdout.columns || 80,
+    rows: process.stdout.rows || 30
+  });
+
+  // 监听终端尺寸变化
+  useEffect(() => {
+    const handleResize = () => {
+      setTerminalSize({
+        columns: process.stdout.columns || 80,
+        rows: process.stdout.rows || 30
+      });
+    };
+
+    process.stdout.on('resize', handleResize);
+    return () => {
+      process.stdout.off('resize', handleResize);
+    };
+  }, []);
+
+  // 自定义滚动管理
+  const [messageLines, setMessageLines] = useState([]); // 所有消息行
+  const [scrollPosition, setScrollPosition] = useState(0); // 当前滚动位置
+  const conversationHeight = Math.floor(terminalSize.rows * 0.65) - 2; // Conversation区域高度（行数）
   
   // Ctrl+C 退出控制
   const [lastCtrlC, setLastCtrlC] = useState(0);
@@ -178,6 +261,26 @@ function App() {
   const [abortMessage, setAbortMessage] = useState(null); // 中止任务的提示
   const abortControllerRef = useRef(null);
   const inputRef = useRef(''); // 用于在 useInput 中获取最新的 input 值
+
+  // 当消息更新时，重新计算行
+  useEffect(() => {
+    const allLines = [];
+    const maxWidth = Math.floor(terminalSize.columns * 0.7) - 4; // Conversation区域宽度
+
+    for (const message of messages) {
+      const lines = formatMessageAsLines(message, maxWidth);
+      allLines.push(...lines);
+    }
+
+    setMessageLines(allLines);
+
+    // 自动滚动到底部（如果不是用户主动滚动）
+    const maxPosition = Math.max(0, allLines.length - conversationHeight);
+    // 只有在处理新消息时才自动滚动
+    if (isProcessing || allLines.length < 100) {
+      setScrollPosition(maxPosition);
+    }
+  }, [messages, terminalSize.columns, conversationHeight, isProcessing]);
 
   // 键盘输入处理（用于滚动和 Ctrl+C）
   useInput((input, key) => {
@@ -219,30 +322,43 @@ function App() {
       return;
     }
 
-    // 处理滚动
-    // 当输入框为空时：方向键/PageUp/PageDown 直接滚动
-    // 当输入框有内容时：PageUp/PageDown 仍可滚动
-    // Alt+↑/↓: 始终可用，作为备用滚动方式
+    // 处理 Tab 键 - 切换 Thinking 开关
+    if (key.tab) {
+      setThinkingEnabled(prev => {
+        const newValue = !prev;
+        process.env.CLOSER_THINKING_ENABLED = newValue ? '1' : '0';
+        setActivity(newValue ? '✅ Thinking 已启用' : '🚫 Thinking 已禁用');
+        setTimeout(() => setActivity(null), 2000);
+        return newValue;
+      });
+      return;
+    }
 
+    // 处理滚动（使用自定义滚动系统）
     // PageUp/PageDown - 始终可用于滚动
     if (key.pageUp) {
-      setScrollOffset(prev => Math.min(prev + 10, Math.max(0, messages.length - maxVisibleMessages)));
+      const delta = Math.min(10, conversationHeight);
+      setScrollPosition(prev => Math.max(0, prev - delta));
     } else if (key.pageDown) {
-      setScrollOffset(0); // 回到底部
+      const delta = Math.min(10, conversationHeight);
+      const maxPosition = Math.max(0, messageLines.length - conversationHeight);
+      setScrollPosition(prev => Math.min(maxPosition, prev + delta));
     }
     // 方向键 - 仅在输入框为空时滚动（避免与光标移动冲突）
     else if (inputRef.current.length === 0) {
       if (key.upArrow) {
-        setScrollOffset(prev => Math.min(prev + 5, Math.max(0, messages.length - maxVisibleMessages)));
+        setScrollPosition(prev => Math.max(0, prev - 1));
       } else if (key.downArrow) {
-        setScrollOffset(prev => Math.max(0, prev - 5));
+        const maxPosition = Math.max(0, messageLines.length - conversationHeight);
+        setScrollPosition(prev => Math.min(maxPosition, prev + 1));
       }
     }
     // Alt 键组合 - 始终可用
     else if (key.alt && key.upArrow) {
-      setScrollOffset(prev => Math.min(prev + 5, Math.max(0, messages.length - maxVisibleMessages)));
+      setScrollPosition(prev => Math.max(0, prev - 1));
     } else if (key.alt && key.downArrow) {
-      setScrollOffset(prev => Math.max(0, prev - 5));
+      const maxPosition = Math.max(0, messageLines.length - conversationHeight);
+      setScrollPosition(prev => Math.min(maxPosition, prev + 1));
     }
   }, { capture: true }); // capture: true 确保能捕获按键
 
@@ -255,9 +371,6 @@ function App() {
 
         const conv = await createConversation(cfg);
         setConversation(conv);
-
-        // 加载日志
-        await loadLatestLogs();
 
         // 欢迎消息
         const welcomeMsg = {
@@ -287,34 +400,6 @@ Type your message or command to get started.`
     init();
   }, []);
 
-  // 加载最新日志
-  const loadLatestLogs = async () => {
-    try {
-      const fs = await import('fs/promises');
-      const path = await import('path');
-      const os = await import('os');
-
-      const logDir = path.join(os.homedir(), '.closer-code', 'logs');
-      const files = await fs.readdir(logDir);
-
-      // 找到最新的日志文件
-      const logFiles = files
-        .filter(f => f.startsWith('closer_debug_log_'))
-        .sort()
-        .reverse();
-
-      if (logFiles.length > 0) {
-        const latestLog = path.join(logDir, logFiles[0]);
-        const content = await fs.readFile(latestLog, 'utf-8');
-
-        // 只显示最后 50 行
-        const lines = content.split('\n').slice(-50);
-        setLogs(lines);
-      }
-    } catch (error) {
-      console.error('Failed to load logs:', error);
-    }
-  };
 
   // 处理用户输入
   const handleSubmit = useCallback(async (value) => {
@@ -323,7 +408,6 @@ Type your message or command to get started.`
     setInput('');
     setIsProcessing(true);
     setActivity('📤 发送消息到 AI...');
-    setScrollOffset(0); // 重置滚动到底部
 
     // 添加用户消息
     const userMsg = { role: 'user', content: value };
@@ -617,31 +701,6 @@ Type your message or command to get started.`
         </Box>
       </Box>
 
-      {/* 日志区域 - 占17.5%高度 */}
-      <Box
-        borderStyle="round"
-        borderColor="gray"
-        flexDirection="column"
-        flexGrow={17.5}
-        marginBottom={1}
-        width="100%"
-      >
-        <Box borderBottom={false} borderColor="gray" paddingBottom={0} marginBottom={1}>
-          <Text bold color="gray">📋 Latest Logs</Text>
-        </Box>
-        <Box flexGrow={1} flexDirection="column" overflow="hidden" width="100%">
-          {logs.length > 0 ? (
-            logs.slice(-15).map((line, i) => (
-              <Box key={i} width="100%">
-                <Text dim color="gray" wrap="truncate">{line.slice(0, 100)}</Text>
-              </Box>
-            ))
-          ) : (
-            <Text dim>No logs available</Text>
-          )}
-        </Box>
-      </Box>
-
       {/* Thinking 区域 - 占17.5%高度 */}
       <Box
         borderStyle="round"
@@ -652,7 +711,10 @@ Type your message or command to get started.`
         width="100%"
       >
         <Box borderBottom={false} borderColor="cyan" paddingBottom={0} marginBottom={1}>
-          <Text bold color="cyan">🧠 AI Thinking Process</Text>
+          <Text bold color="cyan">
+            🧠 AI Thinking Process
+            <Text dim color="gray"> [Tab: {thinkingEnabled ? 'ON ✅' : 'OFF ❌'}]</Text>
+          </Text>
         </Box>
         <Box flexGrow={1} flexDirection="column" overflow="hidden" width="100%">
           {thinking.length > 0 ? (
@@ -683,22 +745,30 @@ Type your message or command to get started.`
             <Box borderBottom={false} borderColor="blue" paddingBottom={0} marginBottom={1}>
               <Text bold color="blue">💬 Conversation</Text>
             </Box>
-            <Box flexGrow={1} flexDirection="column" overflow="hidden" width="100%" height="100%">
-              {messages.length > 0 ? (
+            <Box flexDirection="column" overflow="hidden" width="100%" height="100%">
+              {messageLines.length > 0 ? (
                 <>
-                  {scrollOffset > 0 && (
+                  {/* 滚动提示 */}
+                  {scrollPosition > 0 && (
                     <Box marginBottom={1} width="100%">
-                      <Text dim color="blue">↑ Scrolled up ({scrollOffset} lines hidden) - Press Alt+↓ or Alt+PageDown to return</Text>
+                      <Text dim color="blue">↑ Line {scrollPosition + 1} of {messageLines.length} - Press Alt+↓ or PageDown to scroll</Text>
                     </Box>
                   )}
-                  {messages
-                    .slice(Math.max(0, messages.length - maxVisibleMessages - scrollOffset), messages.length - scrollOffset || undefined)
-                    .map((message, index) => (
-                      <MessageItem key={message.key || index} message={message} />
-                    ))}
+                  {scrollPosition + conversationHeight < messageLines.length && (
+                    <Box marginBottom={1} width="100%">
+                      <Text dim color="blue">↓ {messageLines.length - scrollPosition - conversationHeight} more lines below</Text>
+                    </Box>
+                  )}
+                  <ScrollContainer
+                    items={messageLines}
+                    height={conversationHeight}
+                    scrollPosition={scrollPosition}
+                  />
                 </>
               ) : (
-                <Text dim>No messages yet</Text>
+                <Box justifyContent="center" alignItems="center" height="100%">
+                  <Text dim>No messages yet</Text>
+                </Box>
               )}
             </Box>
           </Box>

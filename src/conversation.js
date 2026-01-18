@@ -353,7 +353,7 @@ No custom behavior guidelines found. You can add them by:
    * 2. 如果 AI 调用工具，执行工具并发送结果回 AI
    * 3. 重复直到 AI 完成响应
    */
-  async sendMessage(userMessage, onProgress = null) {
+  async sendMessage(userMessage, onProgress = null, options = {}) {
     if (this.isProcessing) {
       throw new Error('Already processing a message');
     }
@@ -605,7 +605,8 @@ No custom behavior guidelines found. You can add them by:
         this.messages,
         {
           system: this.systemPrompt,
-          tools: tools
+          tools: tools,
+          thinking: options.thinking || (process.env.CLOSER_THINKING_ENABLED !== '0' ? { type: 'enabled', budget_tokens: 20000 } : { type: 'disabled' })
         },
         (chunk) => {
           // 处理 thinking 事件（使用 SDK 事件监听器 API）
