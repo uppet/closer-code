@@ -86,7 +86,7 @@ function MessageItem({ message }) {
 function TaskProgress({ plan }) {
   if (!plan) return null;
 
-  const { completed, total, percentage } = plan.getProgress();
+  const { completed, total, percentage } = plan.getProgress ? plan.getProgress() : { completed: 0, total: 0, percentage: 0 };
   const statusColor = plan.status === 'completed' ? 'green' :
                      plan.status === 'failed' ? 'red' :
                      plan.status === 'in_progress' ? 'yellow' : 'gray';
@@ -97,20 +97,40 @@ function TaskProgress({ plan }) {
   const empty = barWidth - filled;
   const bar = '█'.repeat(filled) + '░'.repeat(empty);
 
+  // Plan 类型标识
+  const typeLabel = plan.type === 'auto' ? '🤖 AI' : '📋';
+
   return (
     <Box flexDirection="column" marginBottom={1}>
       <Box>
         <Text bold color={statusColor}>
-          {plan.description}
+          {typeLabel} {plan.description}
         </Text>
       </Box>
       <Box>
         <Text color="cyan">[{bar}]</Text>
         <Text dim> {completed}/{total} ({Math.round(percentage)}%)</Text>
       </Box>
-      {plan.error && (
+      {plan.steps && plan.steps.length > 0 && (
+        <Box flexDirection="column" marginTop={1}>
+          {plan.steps.slice(-3).map((step, i) => {
+            const stepIcon = step.status === 'completed' ? '✓' :
+                           step.status === 'in_progress' ? '→' :
+                           step.status === 'failed' ? '✗' : '○';
+            const stepColor = step.status === 'completed' ? 'green' :
+                            step.status === 'in_progress' ? 'yellow' :
+                            step.status === 'failed' ? 'red' : 'gray';
+            return (
+              <Box key={step.id || i}>
+                <Text color={stepColor}>{stepIcon} {step.description}</Text>
+              </Box>
+            );
+          })}
+        </Box>
+      )}
+      {plan.metadata?.error && (
         <Box>
-          <Text color="red">Error: {plan.error}</Text>
+          <Text color="red">Error: {plan.metadata.error}</Text>
         </Box>
       )}
     </Box>
@@ -362,6 +382,13 @@ Type your message or command to get started.`
                 }];
               }
             });
+          } else if (progress.type === 'plan_created') {
+            // AI Planning 被创建
+            setCurrentPlan(progress.plan);
+            setThinking(prev => [...prev, `📋 [${new Date().toLocaleTimeString()}] AI Planning 已创建`]);
+          } else if (progress.type === 'plan_progress') {
+            // AI Planning 进度更新
+            setCurrentPlan(progress.plan);
           } else if (progress.type === 'tool_start') {
             const thinkingMsg = `⚡ [${new Date().toLocaleTimeString()}] 调用工具: ${progress.tool}`;
             setActivity(`⚡ 执行工具: ${progress.tool}...`);
@@ -448,21 +475,22 @@ Type your message or command to get started.`
         setActivity('📋 规划任务...');
         setStatus('Planning...');
         const planResult = await conversation.planAndExecute(args.join(' '), (progress) => {
-          if (progress.type === 'plan_created') {
+          if (progress.type === 'plan_created' || progress.type === 'plan_ready') {
             setActivity('📋 任务计划已创建');
             setCurrentPlan(progress.plan);
-          } else if (progress.type === 'execution_progress') {
-            setActivity('⚙️ 执行任务中...');
-            setCurrentPlan(prev => {
-              if (prev && prev.id === progress.event.plan?.id) {
-                return progress.event.plan;
-              }
-              return prev;
-            });
+          } else if (progress.type === 'step_start') {
+            setActivity(`⚙️ ${progress.step.description}`);
+            setCurrentPlan(progress.plan);
+          } else if (progress.type === 'step_complete' || progress.type === 'step_failed') {
+            setCurrentPlan(progress.plan);
           }
         });
         setStatus('Ready');
         setActivity(null);
+        setMessages(prev => [...prev, {
+          role: 'system',
+          content: `✅ Plan ${planResult.success ? 'completed' : 'failed'}`
+        }]);
         break;
 
       case '/learn':
