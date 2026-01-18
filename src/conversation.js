@@ -353,7 +353,20 @@ ${clocoContent || 'No project-specific guidelines available.'}
         const toolUseBlocks = response.content.filter(block => block.type === 'tool_use');
 
         if (toolUseBlocks.length === 0) {
-          // 没有工具调用，提取文本内容并结束
+          // 没有工具调用，先提取 thinking 内容，再提取文本内容
+          const thinkingBlocks = response.content.filter(block => block.type === 'thinking');
+
+          // 发送 thinking 内容到 UI
+          if (thinkingBlocks.length > 0 && typeof onProgress === 'function') {
+            for (const block of thinkingBlocks) {
+              onProgress({
+                type: 'thinking',
+                content: block.thinking
+              });
+            }
+          }
+
+          // 提取文本内容
           fullTextContent = response.content
             .filter(block => block.type === 'text')
             .map(block => block.text)
@@ -451,11 +464,27 @@ ${clocoContent || 'No project-specific guidelines available.'}
       }
 
       // 提取最终文本内容
-      const textContent = fullTextContent ||
-        this.messages[this.messages.length - 1]?.content
-          ?.filter(block => block.type === 'text')
-          ?.map(block => block.text)
-          ?.join('\n') || '';
+      const lastMessage = this.messages[this.messages.length - 1];
+      let textContent = fullTextContent;
+
+      if (!textContent && lastMessage?.content) {
+        // 先提取 thinking 内容
+        const thinkingBlocks = lastMessage.content.filter(block => block.type === 'thinking');
+        if (thinkingBlocks.length > 0 && typeof onProgress === 'function') {
+          for (const block of thinkingBlocks) {
+            onProgress({
+              type: 'thinking',
+              content: block.thinking
+            });
+          }
+        }
+
+        // 再提取文本内容
+        textContent = lastMessage.content
+          .filter(block => block.type === 'text')
+          .map(block => block.text)
+          .join('\n') || '';
+      }
 
       // 记录 AI 响应
       await logAIResponse({ content: [{ type: 'text', text: textContent }] });
@@ -524,8 +553,17 @@ ${clocoContent || 'No project-specific guidelines available.'}
             });
           }
 
+          // 处理 thinking 事件
+          if (chunk.type === 'content_block_delta' && chunk.delta?.thinking) {
+            if (typeof onProgress === 'function') {
+              onProgress({
+                type: 'thinking',
+                content: chunk.delta.thinking
+              });
+            }
+          }
           // 收集响应内容
-          if (chunk.type === 'content_block_delta' && chunk.delta?.text) {
+          else if (chunk.type === 'content_block_delta' && chunk.delta?.text) {
             if (typeof onProgress === 'function') {
               onProgress({
                 type: 'token',

@@ -48,35 +48,13 @@ function MessageItem({ message }) {
     ? message.content
     : JSON.stringify(message.content);
 
-  // 限制消息的最大行数和字符数
-  const maxLines = 10;
-  const maxChars = 1000;
-
-  const lines = content.split('\n');
-  let displayContent = content;
-  let isTruncated = false;
-
-  if (content.length > maxChars) {
-    displayContent = content.slice(0, maxChars);
-    isTruncated = true;
-  }
-
-  const displayLines = displayContent.split('\n');
-  if (displayLines.length > maxLines) {
-    displayContent = displayLines.slice(0, maxLines).join('\n');
-    isTruncated = true;
-  }
-
   return (
     <Box marginBottom={1} flexDirection="column" width="100%">
       <Box width="100%">
         <Text dim color={color}>
           {prefix}
         </Text>
-        <Text color={color} wrap="wrap">{displayContent}</Text>
-        {isTruncated && (
-          <Text dim color="gray">... (truncated)</Text>
-        )}
+        <Text color={color} wrap="wrap">{content}</Text>
       </Box>
     </Box>
   );
@@ -199,10 +177,11 @@ function App() {
   const [showExitHint, setShowExitHint] = useState(false);
   const [abortMessage, setAbortMessage] = useState(null); // 中止任务的提示
   const abortControllerRef = useRef(null);
+  const inputRef = useRef(''); // 用于在 useInput 中获取最新的 input 值
 
   // 键盘输入处理（用于滚动和 Ctrl+C）
   useInput((input, key) => {
-    // 处理 Ctrl+C 和 ESC
+    // 处理 Ctrl+C 和 ESC（始终有效，即使在输入模式）
     if ((key.ctrl && input === 'c') || key.escape) {
       const now = Date.now();
 
@@ -239,18 +218,33 @@ function App() {
       }
       return;
     }
-    
-    // 当不在输入模式时处理滚动
-    if (key.upArrow) {
-      setScrollOffset(prev => Math.min(prev + 5, Math.max(0, messages.length - maxVisibleMessages)));
-    } else if (key.downArrow) {
-      setScrollOffset(prev => Math.max(0, prev - 5));
-    } else if (key.pageUp) {
+
+    // 处理滚动
+    // 当输入框为空时：方向键/PageUp/PageDown 直接滚动
+    // 当输入框有内容时：PageUp/PageDown 仍可滚动
+    // Alt+↑/↓: 始终可用，作为备用滚动方式
+
+    // PageUp/PageDown - 始终可用于滚动
+    if (key.pageUp) {
       setScrollOffset(prev => Math.min(prev + 10, Math.max(0, messages.length - maxVisibleMessages)));
-    } else if (key.pageDown || key.return) {
+    } else if (key.pageDown) {
       setScrollOffset(0); // 回到底部
     }
-  }, { capture: true }); // capture: true 确保 Ctrl+C 被捕获而不是传递给终端
+    // 方向键 - 仅在输入框为空时滚动（避免与光标移动冲突）
+    else if (inputRef.current.length === 0) {
+      if (key.upArrow) {
+        setScrollOffset(prev => Math.min(prev + 5, Math.max(0, messages.length - maxVisibleMessages)));
+      } else if (key.downArrow) {
+        setScrollOffset(prev => Math.max(0, prev - 5));
+      }
+    }
+    // Alt 键组合 - 始终可用
+    else if (key.alt && key.upArrow) {
+      setScrollOffset(prev => Math.min(prev + 5, Math.max(0, messages.length - maxVisibleMessages)));
+    } else if (key.alt && key.downArrow) {
+      setScrollOffset(prev => Math.max(0, prev - 5));
+    }
+  }, { capture: true }); // capture: true 确保能捕获按键
 
   // 初始化
   useEffect(() => {
@@ -357,7 +351,20 @@ Type your message or command to get started.`
         value,
         (progress) => {
           // 处理流式响应
-          if (progress.type === 'token') {
+          if (progress.type === 'thinking') {
+            // AI thinking 内容
+            setActivity('🤔 AI 正在深度思考...');
+            setThinking(prev => {
+              const newThinking = [...prev];
+              // 更新最后一条 thinking 或添加新的一条
+              if (newThinking.length > 0 && newThinking[newThinking.length - 1].startsWith('🤔')) {
+                newThinking[newThinking.length - 1] = `🤔 [${new Date().toLocaleTimeString()}] ${progress.content}`;
+              } else {
+                newThinking.push(`🤔 [${new Date().toLocaleTimeString()}] ${progress.content}`);
+              }
+              return newThinking.slice(-10); // 只保留最后 10 条
+            });
+          } else if (progress.type === 'token') {
             setActivity('✍️ AI 正在输入...');
             setThinking(prev => [...prev, `✍️ [${new Date().toLocaleTimeString()}] 生成响应中...`]);
             setMessages(prev => {
@@ -654,7 +661,7 @@ Type your message or command to get started.`
                 <>
                   {scrollOffset > 0 && (
                     <Box marginBottom={1} width="100%">
-                      <Text dim color="blue">↑ Scrolled up ({scrollOffset} lines hidden) - Press ↓/Enter to return</Text>
+                      <Text dim color="blue">↑ Scrolled up ({scrollOffset} lines hidden) - Press Alt+↓ or Alt+PageDown to return</Text>
                     </Box>
                   )}
                   {messages
@@ -752,7 +759,10 @@ Type your message or command to get started.`
         </Box>
         <TextInput
           value={input}
-          onChange={setInput}
+          onChange={(value) => {
+            setInput(value);
+            inputRef.current = value;
+          }}
           onSubmit={handleSubmit}
           placeholder="Type a message or /help for commands..."
           disabled={isProcessing}

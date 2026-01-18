@@ -39,7 +39,8 @@ export class AnthropicClient {
       system: options.system,
       messages: messages,  // SDK 自动处理格式转换
       tools: options.tools,
-      temperature: options.temperature
+      temperature: options.temperature,
+      thinking: options.thinking || { type: 'enabled', budget_tokens: 1600 }
     });
   }
 
@@ -57,7 +58,8 @@ export class AnthropicClient {
       messages: messages,
       tools: options.tools,
       temperature: options.temperature,
-      stream: true
+      stream: true,
+      thinking: options.thinking || { type: 'enabled', budget_tokens: 1600 }
     });
 
     // SDK 自动处理 SSE 解析
