@@ -97,7 +97,7 @@ export const readFileTool = betaZodTool({
  */
 export const writeFileTool = betaZodTool({
   name: 'writeFile',
-  description: 'Write content to a file (creates or overwrites). Supports both plain text content and base64-encoded content.',
+  description: 'Write content to a file (creates or overwrites). Supports both plain text content and base64-encoded content. Returns detailed error messages if the operation fails, allowing you to analyze and fix the issue.',
   inputSchema: z.object({
     filePath: z.string().describe('Absolute or relative path to the file'),
     content: z.string().optional().describe('Content to write to the file (plain text)'),
@@ -124,14 +124,38 @@ export const writeFileTool = betaZodTool({
       });
     }
 
-    await fs.writeFile(fullPath, dataToWrite, input.encoding || 'utf-8');
+    try {
+      await fs.writeFile(fullPath, dataToWrite, input.encoding || 'utf-8');
 
-    return JSON.stringify({
-      success: true,
-      path: fullPath,
-      size: dataToWrite.length,
-      encoding: input.contentBase64 ? 'base64' : (input.encoding || 'utf-8')
-    });
+      return JSON.stringify({
+        success: true,
+        path: fullPath,
+        size: dataToWrite.length,
+        encoding: input.contentBase64 ? 'base64' : (input.encoding || 'utf-8')
+      });
+    } catch (error) {
+      // 提供详细的错误信息和修复建议
+      let errorDetail = {
+        success: false,
+        error: error.code,
+        message: error.message,
+        path: fullPath
+      };
+
+      // 针对常见错误提供修复建议
+      if (error.code === 'ENOENT') {
+        const parentDir = path.dirname(fullPath);
+        errorDetail.suggestion = `Parent directory does not exist. Create it first using: bash tool with "mkdir -p ${parentDir}"`;
+        errorDetail.hint = 'The parent directory needs to be created before writing the file.';
+      } else if (error.code === 'EACCES') {
+        errorDetail.suggestion = 'Permission denied. Check if you have write permissions for this location.';
+        errorDetail.hint = 'Try writing to a different location or check file permissions.';
+      } else if (error.code === 'ENOSPC') {
+        errorDetail.suggestion = 'No space left on device. Free up some disk space and retry.';
+      }
+
+      return JSON.stringify(errorDetail);
+    }
   }
 });
 

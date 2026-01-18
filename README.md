@@ -555,6 +555,36 @@ npm run check
 
 ## 实验记录
 
+### AI 错误处理和自我修复能力 🆕
+
+**问题**：在空目录中创建多文件项目时，AI 会因为父目录不存在而失败，导致工作流中断。
+
+**解决方案**：
+- 工具返回详细的错误信息和修复建议（而不是自动处理）
+- AI 分析错误并自主决定解决方案
+- AI 执行修复操作（如创建目录）
+- AI 重试原操作（最多 3 次）
+
+**设计理念**：
+- ❌ 不是简单地在工具层自动处理（绕过 AI 思考）
+- ✅ 而是让 AI 具备真正的错误分析和自我修复能力
+
+**示例**：
+```bash
+# AI 的自我修复过程
+cloco -b "创建一个 React 组件在 src/components/Button.tsx"
+
+# AI 执行：
+# 1. 尝试写入 → 失败（目录不存在）
+# 2. 分析错误 → ENOENT，需要创建目录
+# 3. 执行修复 → mkdir -p src/components/
+# 4. 重试写入 → 成功！
+```
+
+**测试验证**：
+- 单元测试：`node test/test-auto-mkdir.js`
+- 完整文档：`AUTO_MKDIR_IMPROVEMENT.md`
+
 ### Ctrl+C 双击退出功能
 
 在 Ink (React CLI) 应用中实现了标准的 Ctrl+C 双击退出行为。完整的实验记录和实现方案见 [CTRL_C_EXPERIMENT.md](./CTRL_C_EXPERIMENT.md)。
