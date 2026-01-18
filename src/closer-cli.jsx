@@ -436,18 +436,24 @@ Type your message or command to get started.`
         (progress) => {
           // 处理流式响应（使用 SDK 事件监听器 API）
           if (progress.type === 'thinking') {
-            // AI thinking 内容（使用完整快照）
+            // AI thinking 内容 - 逐字显示
             setActivity('🤔 AI 正在深度思考...');
             setThinking(prev => {
               const newThinking = [...prev];
-              // 使用 snapshot（完整快照）而不是 delta（增量）
-              // 这样可以避免重复内容
-              const thinkingContent = progress.snapshot || progress.content;
-              const lastEntry = `🤔 [${new Date().toLocaleTimeString()}] ${thinkingContent}`;
 
-              // 检查最后一条是否相同，避免重复
-              if (newThinking.length === 0 || newThinking[newThinking.length - 1] !== lastEntry) {
-                newThinking.push(lastEntry);
+              // 检查最后一条是否是当前 thinking（未完成的）
+              const lastEntry = newThinking[newThinking.length - 1];
+              const thinkingDelta = progress.delta || '';
+
+              if (lastEntry && lastEntry.startsWith('🤔') && !lastEntry.includes('✅')) {
+                // 追加增量到当前的 thinking 条目
+                const timestamp = lastEntry.match(/\[.*?\]/)[0];
+                const currentContent = lastEntry.substring(lastEntry.indexOf('] ') + 2);
+                newThinking[newThinking.length - 1] = `🤔 ${timestamp} ${currentContent}${thinkingDelta}`;
+              } else {
+                // 创建新的 thinking 条目
+                const timestamp = `[${new Date().toLocaleTimeString()}]`;
+                newThinking.push(`🤔 ${timestamp} ${thinkingDelta}`);
               }
 
               return newThinking.slice(-30); // 保留最后 30 条thinking记录
@@ -476,22 +482,24 @@ Type your message or command to get started.`
               return newThinking.slice(-10);
             });
           } else if (progress.type === 'token') {
+            // 真正的流式文本
             setActivity('✍️ AI 正在输入...');
             setThinking(prev => [...prev, `✍️ [${new Date().toLocaleTimeString()}] 生成响应中...`]);
             setMessages(prev => {
               const lastMsg = prev[prev.length - 1];
 
               if (lastMsg && lastMsg.role === 'assistant' && !lastMsg.complete) {
-                // 更新 key 强制重新渲染
+                // 追加内容
                 return [
                   ...prev.slice(0, -1),
                   {
                     ...lastMsg,
                     content: lastMsg.content + progress.content,
-                    key: Date.now() // 每次更新都改变 key
+                    key: Date.now()
                   }
                 ];
               } else {
+                // 创建新消息
                 return [...prev, {
                   role: 'assistant',
                   content: progress.content,
@@ -500,6 +508,11 @@ Type your message or command to get started.`
                 }];
               }
             });
+          } else if (progress.type === 'tool_use_start') {
+            // 检测到工具调用
+            const thinkingMsg = `⚡ [${new Date().toLocaleTimeString()}] 检测到工具调用: ${progress.toolName}`;
+            setActivity(`⚡ 准备执行工具: ${progress.toolName}...`);
+            setThinking(prev => [...prev, thinkingMsg]);
           } else if (progress.type === 'plan_created') {
             // AI Planning 被创建
             setCurrentPlan(progress.plan);

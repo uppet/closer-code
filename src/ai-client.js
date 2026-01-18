@@ -100,6 +100,26 @@ export class AnthropicClient {
       }
     });
 
+    // 监听所有原始事件
+    stream.on('content_block_start', (contentBlock) => {
+      if (typeof onChunk === 'function') {
+        onChunk({
+          type: 'content_block_start',
+          blockType: contentBlock.type,
+          block: contentBlock
+        });
+      }
+    });
+
+    stream.on('content_block_delta', (delta) => {
+      if (typeof onChunk === 'function') {
+        onChunk({
+          type: 'content_block_delta',
+          delta: delta.delta
+        });
+      }
+    });
+
     // 获取最终消息
     return await stream.finalMessage();
   }

@@ -375,7 +375,7 @@ No custom behavior guidelines found. You can add them by:
       // 获取工具定义（使用 Zod 工具）
       const tools = getToolDefinitions(this.config.tools.enabled);
 
-      // 手动处理工具调用循环
+      // 手动处理工具调用循环 - 全部使用流式 API
       let currentMessages = [...this.messages];
       let fullTextContent = '';
       let hasToolCalls = false;
@@ -384,41 +384,60 @@ No custom behavior guidelines found. You can add them by:
 
       // 工具调用循环
       while (true) {
-        // 发送消息给 AI
-        const response = await aiClient.chat(currentMessages, {
-          system: this.systemPrompt,
-          tools: tools,
-          temperature: 0.7
-        });
+        // 使用流式 API 发送消息
+        const response = await aiClient.chatStream(
+          currentMessages,
+          {
+            system: this.systemPrompt,
+            tools: tools,
+            temperature: 0.7,
+            thinking: process.env.CLOSER_THINKING_ENABLED !== '0' ? { type: 'enabled', budget_tokens: 20000 } : { type: 'disabled' }
+          },
+          (chunk) => {
+            // 处理流式事件
+            if (chunk.type === 'thinking') {
+              if (typeof onProgress === 'function') {
+                onProgress({
+                  type: 'thinking',
+                  delta: chunk.delta,      // 增量内容
+                  snapshot: chunk.snapshot  // 完整快照
+                });
+              }
+            } else if (chunk.type === 'signature') {
+              if (typeof onProgress === 'function') {
+                onProgress({
+                  type: 'thinking_signature',
+                  signature: chunk.signature
+                });
+              }
+            } else if (chunk.type === 'text') {
+              // 真正的流式文本
+              if (typeof onProgress === 'function') {
+                onProgress({
+                  type: 'token',
+                  content: chunk.delta
+                });
+              }
+            } else if (chunk.type === 'content_block_start') {
+              // 检测到工具调用块开始
+              if (chunk.blockType === 'tool_use') {
+                if (typeof onProgress === 'function') {
+                  onProgress({
+                    type: 'tool_use_start',
+                    toolName: chunk.block.name,
+                    toolId: chunk.block.id
+                  });
+                }
+              }
+            }
+          }
+        );
 
         // 检查是否有工具调用
         const toolUseBlocks = response.content.filter(block => block.type === 'tool_use');
 
         if (toolUseBlocks.length === 0) {
-          // 没有工具调用，先提取 thinking 相关内容，再提取文本内容
-          const thinkingBlocks = response.content.filter(block =>
-            block.type === 'thinking' || block.type === 'redacted_thinking'
-          );
-
-          // 发送 thinking 内容到 UI（符合官方示例）
-          if (thinkingBlocks.length > 0 && typeof onProgress === 'function') {
-            for (const block of thinkingBlocks) {
-              if (block.type === 'thinking') {
-                onProgress({
-                  type: 'thinking',
-                  content: block.thinking,
-                  signature: block.signature
-                });
-              } else if (block.type === 'redacted_thinking') {
-                onProgress({
-                  type: 'thinking_redacted',
-                  content: block.data
-                });
-              }
-            }
-          }
-
-          // 提取文本内容
+          // 没有工具调用，提取最终文本内容（用于保存历史）
           fullTextContent = response.content
             .filter(block => block.type === 'text')
             .map(block => block.text)
