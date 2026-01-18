@@ -14,7 +14,6 @@ import { createAIClient } from './ai-client.js';
 import { setToolExecutorContext, getToolDefinitions } from './tools.js';
 import { loadHistory, saveHistory, loadMemory } from './config.js';
 import { Plan, PlanType, PlanStatus, StepStatus } from './plan.js';
-import { getSystemPrompt } from './prompt-builder.js';
 import {
   initLogger,
   logConfig,
@@ -113,117 +112,16 @@ export class Conversation {
   }
 
   /**
-   * 构建系统提示
+   * 构建系统提示（使用 prompt-builder 模块）
    */
   async buildSystemPrompt() {
-    const memory = loadMemory();
-    const projectKey = this.config.behavior.workingDir || 'default';
-    const projectInfo = memory.projects?.[projectKey];
+    const { getSystemPrompt } = await import('./prompt-builder.js');
+    this.systemPrompt = await getSystemPrompt(this.config, this.workflowTest);
 
-    // 读取全局 cloco.md 文件内容
-    let globalClocoContent = '';
-    try {
-      const fs = await import('fs/promises');
-      const path = await import('path');
-      const os = await import('os');
-
-      // 获取用户主目录
-      const homeDir = os.homedir();
-      const globalClocoPath = path.join(homeDir, '.closer-code', 'cloco.md');
-
-      globalClocoContent = await fs.readFile(globalClocoPath, 'utf-8');
-      console.log('✅ 已加载全局行为规范: ~/.closer-code/cloco.md');
-    } catch (error) {
-      // 全局配置不存在是正常情况，不报错
-      if (error.code !== 'ENOENT') {
-        console.error('读取全局 cloco.md 失败:', error.message);
-      }
+    // 添加 workflow 测试提示词（如果需要）
+    if (this.workflowTest) {
+      this.systemPrompt += WORKFLOW_SYSTEM_PROMPT;
     }
-
-    // 读取项目级 cloco.md 文件内容
-    let projectClocoContent = '';
-    try {
-      const fs = await import('fs/promises');
-      const path = await import('path');
-      const clocoPath = path.join(process.cwd(), 'cloco.md');
-      projectClocoContent = await fs.readFile(clocoPath, 'utf-8');
-      console.log('✅ 已加载项目行为规范: ./cloco.md');
-    } catch (error) {
-      // 项目配置不存在是正常情况，不报错
-      if (error.code !== 'ENOENT') {
-        console.error('读取项目 cloco.md 失败:', error.message);
-      }
-    }
-
-    // SDK 版本的系统提示 - 简化版本，更灵活
-    this.systemPrompt = `You are Closer, an AI programming assistant designed to help developers with coding tasks, debugging, and project management.
-
-## Tool Usage
-Use tools to execute actions (bash, readFile, writeFile, editFile, searchFiles, searchCode).
-
-**Key principle**: Use tools proactively - show, don't just talk about it.
-
-## Error Handling (IMPORTANT)
-
-When a tool returns an error:
-1. **Identify** the error type (ENOENT, EACCES, etc.)
-2. **Fix** the issue (create directory, fix permissions, etc.)
-3. **Retry** the operation
-
-**Retry strategy**: 2-3 attempts maximum. If still failing, explain to the user.
-
-Common fixes:
-- Missing directory → \`mkdir -p path/to/dir\`
-- Wrong content → Read file first, then edit
-
-## Task Execution Guide
-When asked to analyze or review code:
-- Start by searching for relevant files
-- Read the key files to understand the codebase
-- Focus on files that are most relevant to the task
-- Provide specific findings with file names and line numbers
-
-**NOTE**: Only perform comprehensive analysis when explicitly requested. For specific questions, focus on the relevant parts.
-
-## Current Context
-Working Directory: ${this.config.behavior.workingDir}
-Available Tools: ${this.config.tools.enabled.join(', ')}
-${projectInfo ? `
-## Project Patterns
-This is a familiar project. Remember these patterns:
-${JSON.stringify(projectInfo.patterns, null, 2)}
-` : ''}
-
-## Behavior Configuration
-- Auto Plan: ${this.config.behavior.autoPlan ? 'Enabled' : 'Disabled'}
-- Auto Execute: ${this.config.behavior.autoExecute ? 'Enabled (low-risk operations only)' : 'Disabled'}
-- Confirm Destructive: ${this.config.behavior.confirmDestructive ? 'Enabled' : 'Disabled'}
-
-${globalClocoContent ? `
-## 📋 Global Behavior Guidelines (CRITICAL)
-**The following global guidelines from ~/.closer-code/cloco.md are EXTREMELY IMPORTANT and MUST be followed:**
-
-${globalClocoContent}
-
-**These global guidelines take precedence over general instructions. Follow them carefully**
-` : ''}
-
-${projectClocoContent ? `
-## 📋 Project Behavior Guidelines (CRITICAL)
-**The following project-specific guidelines from ./cloco.md are EXTREMELY IMPORTANT and MUST be followed:**
-
-${projectClocoContent}
-
-**These project guidelines take precedence over general instructions. Follow them carefully**
-` : ''}
-
-${!globalClocoContent && !projectClocoContent ? `
-## 📋 Behavior Guidelines
-No custom behavior guidelines found. You can add them by:
-- Creating ~/.closer-code/cloco.md for global guidelines
-- Creating ./cloco.md for project-specific guidelines
-` : ''}`
-+ (this.workflowTest ? WORKFLOW_SYSTEM_PROMPT : '');
   }
 
   /**
