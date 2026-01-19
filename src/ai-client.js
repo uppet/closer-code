@@ -162,7 +162,7 @@ export class AnthropicClient {
  *
  * 注意：OpenAI 和 Ollama 仍然使用原有的实现
  */
-export function createAIClient(config) {
+export async function createAIClient(config) {
   const { provider, anthropic, openai, ollama } = config.ai;
 
   switch (provider) {
@@ -170,21 +170,21 @@ export function createAIClient(config) {
       return new AnthropicClient(anthropic);
     case 'openai':
       // 导入原有的 OpenAI 客户端
-      return createOpenAIClient(openai);
+      return await createOpenAIClient(openai);
     case 'ollama':
       // 导入原有的 Ollama 客户端
-      return createOllamaClient(ollama);
+      return await createOllamaClient(ollama);
     default:
       throw new Error(`Unknown AI provider: ${provider}`);
   }
 }
 
 /**
- * OpenAI 客户端（保留原有实现）
+ * OpenAI 客户端（使用 @openai/agents SDK）
  */
 async function createOpenAIClient(config) {
   // 动态导入以避免循环依赖
-  const { OpenAIClient } = await import('./ai-client-legacy.js');
+  const { OpenAIClient } = await import('./ai-client-openai.js');
   return new OpenAIClient(config);
 }
 

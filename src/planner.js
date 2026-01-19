@@ -80,9 +80,14 @@ export class TaskPlan {
 export class TaskPlanner {
   constructor(config) {
     this.config = config;
-    this.aiClient = createAIClient(config);
+    this._aiClientPromise = createAIClient(config);
     this.toolExecutor = new ToolExecutor(config);
     this.memory = loadMemory();
+  }
+
+  // 延迟初始化的 getter
+  async getAIClient() {
+    return await this._aiClientPromise;
   }
 
   /**
@@ -128,7 +133,8 @@ Respond with only the JSON plan, no additional text.`
     ];
 
     try {
-      const response = await this.aiClient.chat(messages, { systemPrompt });
+      const aiClient = await this.getAIClient();
+      const response = await aiClient.chat(messages, { systemPrompt });
       const text = response.content.find(c => c.type === 'text')?.text || '{}';
       const planData = JSON.parse(text);
 
@@ -309,7 +315,8 @@ Respond with a JSON object describing the patterns found.`;
     ];
 
     try {
-      const response = await this.aiClient.chat(messages, { systemPrompt });
+      const aiClient = await this.getAIClient();
+      const response = await aiClient.chat(messages, { systemPrompt });
       const text = response.content.find(c => c.type === 'text')?.text || '{}';
       const patterns = JSON.parse(text);
 
@@ -335,8 +342,13 @@ Respond with a JSON object describing the patterns found.`;
 export class ProblemDiagnoser {
   constructor(config) {
     this.config = config;
-    this.aiClient = createAIClient(config);
+    this._aiClientPromise = createAIClient(config);
     this.toolExecutor = new ToolExecutor(config);
+  }
+
+  // 延迟初始化的 getter
+  async getAIClient() {
+    return await this._aiClientPromise;
   }
 
   /**
@@ -365,7 +377,8 @@ ${contextInfo ? `\nContext:\n${contextInfo}` : ''}`
       }
     ];
 
-    const response = await this.aiClient.chat(messages, { systemPrompt });
+    const aiClient = await this.getAIClient();
+    const response = await aiClient.chat(messages, { systemPrompt });
     return response.content.find(c => c.type === 'text')?.text;
   }
 

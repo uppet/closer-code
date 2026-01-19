@@ -148,7 +148,7 @@ export class Conversation {
       });
 
       // 获取 AI 客户端
-      const aiClient = createAIClient(this.config);
+      const aiClient = await createAIClient(this.config);
 
       // 获取工具定义（使用 Zod 工具）
       const tools = getToolDefinitions(this.config.tools.enabled);
@@ -231,7 +231,13 @@ export class Conversation {
 
         hasToolCalls = true;
 
-        // 添加助手响应（包含工具调用）到消息历史
+        // 添加助手响应（包含工具调用）到 currentMessages（用于下一轮 AI 请求）
+        currentMessages.push({
+          role: MessageType.ASSISTANT,
+          content: response.content
+        });
+
+        // 同时添加到 this.messages（用于保存历史）
         this.messages.push({
           role: MessageType.ASSISTANT,
           content: response.content
@@ -286,11 +292,6 @@ export class Conversation {
           }
 
           // 添加工具结果到 currentMessages（用于下一次 AI 请求）
-          currentMessages.push({
-            role: MessageType.ASSISTANT,
-            content: response.content
-          });
-
           currentMessages.push({
             role: 'user',
             content: [{
@@ -385,7 +386,7 @@ export class Conversation {
       });
 
       // 获取 AI 客户端
-      const aiClient = createAIClient(this.config);
+      const aiClient = await createAIClient(this.config);
 
       // 获取工具定义
       const tools = getToolDefinitions(this.config.tools.enabled);
