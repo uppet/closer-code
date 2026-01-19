@@ -345,3 +345,23 @@ export async function closeLogger() {
 export function getLogFile() {
   return logFile;
 }
+
+/**
+ * Logger 对象（用于模块导入）
+ */
+export const logger = {
+  debug: (msg) => {
+    if (DEBUG_ENABLED) {
+      console.error(`[DEBUG] ${msg}`);
+    }
+  },
+  info: (msg) => {
+    console.error(`[INFO] ${msg}`);
+  },
+  warn: (msg) => {
+    console.warn(`[WARN] ${msg}`);
+  },
+  error: (msg) => {
+    console.error(`[ERROR] ${msg}`);
+  }
+};

@@ -17,9 +17,20 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+*~
 
 # Claude
 .claude/
 
 # Closer Plan (AI planning and analysis documents)
 .closer_plan/
+
+# Project local config (sensitive)
+.closer-code.local.json
+
+# Backup files
+*.backup
+*.bak
+
+# Temporary files
+

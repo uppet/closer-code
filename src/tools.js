@@ -326,6 +326,33 @@ export function getToolDefinitions(enabledTools) {
 }
 
 /**
+ * 获取所有工具（包括内置工具和 MCP 工具）
+ * @param {Array<string>} enabledTools - 启用的工具名称数组
+ * @param {boolean} includeMCP - 是否包含 MCP 工具
+ * @returns {Promise<Array>} betaZodTool 对象数组
+ */
+export async function getAllToolDefinitions(enabledTools, includeMCP = true) {
+  const tools = [];
+
+  // 添加内置工具
+  const builtinTools = getToolDefinitions(enabledTools);
+  tools.push(...builtinTools);
+
+  // 添加 MCP 工具
+  if (includeMCP) {
+    try {
+      const { getAllMCPToolsAsBetaZod } = await import('./mcp/tools-adapter.js');
+      const mcpTools = await getAllMCPToolsAsBetaZod();
+      tools.push(...mcpTools);
+    } catch (error) {
+      console.warn('Failed to load MCP tools:', error.message);
+    }
+  }
+
+  return tools;
+}
+
+/**
  * 获取工具的 JSON Schema 定义（用于兼容性）
  * @param {Array<string>} enabledTools - 启用的工具名称数组
  * @returns {Array} JSON Schema 格式的工具定义

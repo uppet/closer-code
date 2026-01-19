@@ -9,6 +9,15 @@ const HISTORY_DIR = path.join(CONFIG_DIR, 'history'); // 改为目录
 const HISTORY_FILE = path.join(CONFIG_DIR, 'history.json'); // 保留用于兼容
 const MEMORY_FILE = path.join(CONFIG_DIR, 'memory.json');
 
+// 项目本地配置文件名
+const PROJECT_CONFIG_FILES = [
+  '.closer-code.json',
+  '.closer-code/config.json',
+  'closer-code.json',
+  '.closer-code.local.json',
+  '.closer-code.test.json'  // 用于测试
+];
+
 // 默认配置
 const DEFAULT_CONFIG = {
   // AI 提供商配置
@@ -65,20 +74,130 @@ const DEFAULT_CONFIG = {
     showLineNumbers: true,
     maxOutputLines: 100,
     autoScroll: true
+  },
+
+  // MCP 配置
+  mcp: {
+    enabled: true,  // 是否启用 MCP Client
+    servers: {
+      // 示例：文件系统 MCP Server
+      // filesystem: {
+      //   enabled: false,
+      //   command: 'npx',
+      //   args: ['-y', '@modelcontextprotocol/server-filesystem', '/allowed/path'],
+      //   env: {}
+      // },
+
+      // 示例：Git MCP Server
+      // git: {
+      //   enabled: false,
+      //   command: 'npx',
+      //   args: ['-y', '@modelcontextprotocol/server-git'],
+      //   env: {}
+      // },
+
+      // 示例：PostgreSQL MCP Server
+      // postgres: {
+      //   enabled: false,
+      //   command: 'npx',
+      //   args: ['-y', '@modelcontextprotocol/server-postgres', 'postgresql://user:password@localhost:5432/dbname'],
+      //   env: {}
+      // },
+
+      // 示例：自定义 MCP Server
+      // my-custom-server: {
+      //   enabled: false,
+      //   command: 'node',
+      //   args: ['/path/to/custom-mcp-server.js'],
+      //   env: {
+      //     'CUSTOM_ENV_VAR': 'value'
+      //   }
+      // }
+    }
   }
 };
 
-// 加载配置
-export function loadConfig() {
-  try {
-    if (fs.existsSync(CONFIG_FILE)) {
-      const config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
-      return { ...DEFAULT_CONFIG, ...config };
+/**
+ * 查找项目本地配置文件
+ * @param {string} projectPath - 项目路径（默认为当前工作目录）
+ * @returns {string|null} 配置文件路径，如果未找到则返回 null
+ */
+export function findProjectConfigFile(projectPath = null) {
+  const workingDir = projectPath || process.cwd();
+
+  for (const configFile of PROJECT_CONFIG_FILES) {
+    const configPath = path.join(workingDir, configFile);
+    if (fs.existsSync(configPath)) {
+      return configPath;
     }
+  }
+
+  return null;
+}
+
+/**
+ * 加载项目本地配置
+ * @param {string} projectPath - 项目路径（默认为当前工作目录）
+ * @returns {Object} 项目本地配置，如果未找到则返回空对象
+ */
+export function loadProjectConfig(projectPath = null) {
+  const projectConfigPath = findProjectConfigFile(projectPath);
+
+  if (!projectConfigPath) {
+    return {};
+  }
+
+  try {
+    const projectConfig = JSON.parse(fs.readFileSync(projectConfigPath, 'utf-8'));
+    const workingDir = projectPath || process.cwd();
+    console.log(`[Config] Loaded project config from: ${projectConfigPath}`);
+    console.log(`[Config] Project path: ${workingDir}`);
+    return projectConfig;
+  } catch (error) {
+    console.warn(`[Config] Failed to load project config from ${projectConfigPath}:`, error.message);
+    return {};
+  }
+}
+
+/**
+ * 合并配置（项目本地 > 全局 > 默认）
+ * @param {Object} defaultConfig - 默认配置
+ * @param {Object} globalConfig - 全局配置
+ * @param {Object} projectConfig - 项目本地配置
+ * @returns {Object} 合并后的配置
+ */
+function mergeConfigs(defaultConfig, globalConfig, projectConfig) {
+  // 先合并全局配置到默认配置
+  const merged = deepMerge(defaultConfig, globalConfig);
+  // 再合并项目配置
+  return deepMerge(merged, projectConfig);
+}
+
+// 加载配置
+export function loadConfig(projectPath = null) {
+  try {
+    // 加载全局配置
+    let globalConfig = {};
+    if (fs.existsSync(CONFIG_FILE)) {
+      globalConfig = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
+    }
+
+    // 加载项目本地配置
+    const projectConfig = loadProjectConfig(projectPath);
+
+    // 合并配置
+    const finalConfig = mergeConfigs(DEFAULT_CONFIG, globalConfig, projectConfig);
+
+    // 如果加载了项目配置，显示信息
+    if (Object.keys(projectConfig).length > 0) {
+      console.log(`[Config] Using merged config (project + global)`);
+    }
+
+    return finalConfig;
   } catch (error) {
     console.warn('Failed to load config, using defaults:', error.message);
+    return DEFAULT_CONFIG;
   }
-  return DEFAULT_CONFIG;
 }
 
 // 检查配置是否存在且有效
@@ -340,4 +459,16 @@ function deepMerge(target, source) {
     }
   }
   return result;
+}
+
+/**
+ * 获取当前使用的配置文件路径
+ * @returns {Object} { global, project, active }
+ */
+export function getConfigPaths() {
+  return {
+    global: CONFIG_FILE,
+    project: findProjectConfigFile(),
+    active: findProjectConfigFile() || CONFIG_FILE
+  };
 }

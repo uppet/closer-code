@@ -13,13 +13,14 @@
     "setup": "node src/setup.js",
     "build": "npm run build:main && npm run build:cli && npm run build:bash && npm run build:batch",
     "build:sdk": "esbuild src/ai-client-sdk.js --bundle --platform=node --format=esm --outfile=dist/ai-client-sdk.js --external:@anthropic-ai/sdk && esbuild src/tools-sdk.js --bundle --platform=node --format=esm --outfile=dist/tools-sdk.js --external:@anthropic-ai/sdk && esbuild src/conversation-sdk.js --bundle --platform=node --format=esm --outfile=dist/conversation-sdk.js --external:@anthropic-ai/sdk",
-    "build:main": "esbuild src/index.js --bundle --platform=node --format=esm --outfile=dist/index.js --external:ink --external:react --external:react-devtools-core --external:react-is --external:prop-types --external:@openai/agents --external:@openai/agents-core --external:openai --external:zod",
+    "build:main": "esbuild src/index.js --bundle --platform=node --format=esm --outfile=dist/index.js --external:ink --external:react --external:react-devtools-core --external:react-is --external:prop-types --external:@openai/agents --external:@openai/agents-core --external:openai --external:zod --external:@modelcontextprotocol/sdk",
     "build:cli": "esbuild src/closer-cli.jsx --bundle --platform=node --format=esm --outfile=dist/closer-cli.js --external:ink --external:react --external:ink-text-input --external:ink-select-input --external:ansi-escapes --external:chalk --external:glob",
     "build:bash": "esbuild src/bash-runner.js --bundle --platform=node --format=esm --outfile=dist/bash-runner.js",
     "build:batch": "esbuild src/batch-cli.js --bundle --platform=node --format=esm --outfile=dist/batch-cli.js --external:glob",
     "start": "npm run build:main && node dist/index.js",
     "dev": "npm run build -- --watch",
     "test": "node src/test-modules.js",
+    "test:mcp": "node test/test-mcp.js",
     "check": "node --check dist/index.js",
     "batch": "npm run build:batch && node dist/batch-cli.js"
   },
@@ -34,6 +35,7 @@
   "license": "MIT",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",
+    "@modelcontextprotocol/sdk": "^1.25.2",
     "@openai/agents": "^0.4.0",
     "glob": "^10.3.0",
     "ink": "^4.4.1",
@@ -43,7 +45,7 @@
     "zod": "^4.3.5"
   },
   "devDependencies": {
-    "esbuild": "^0.20.0"
+    "esbuild": "^0.27.2"
   },
   "engines": {
     "node": ">=18.0.0"

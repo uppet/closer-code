@@ -1,0 +1,32 @@
+{
+  "mcp": {
+    "enabled": true,
+    "servers": {
+      "filesystem": {
+        "enabled": true,
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
+        "env": {},
+        "comment": "访问当前项目的文件系统"
+      },
+      "git": {
+        "enabled": true,
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-git"],
+        "env": {},
+        "comment": "访问当前项目的 Git 仓库"
+      }
+    }
+  },
+  "behavior": {
+    "workingDir": ".",
+    "comment": "项目工作目录（默认为当前目录）"
+  },
+  "_comment": {
+    "title": "项目本地配置示例",
+    "description": "这个文件展示如何为特定项目配置 MCP Servers",
+    "usage": "将此文件复制为 .closer-code.json 并根据需要修改",
+    "priority": "项目配置会覆盖全局配置 (~/.closer-code/config.json)",
+    "note": "此文件中的配置只会影响当前项目"
+  }
+}

@@ -1,0 +1,81 @@
+{
+  "ai": {
+    "provider": "anthropic",
+    "anthropic": {
+      "apiKey": "your-api-key-here",
+      "model": "claude-sonnet-4-5-20250929",
+      "maxTokens": 8192
+    }
+  },
+  "behavior": {
+    "autoPlan": true,
+    "autoExecute": false,
+    "confirmDestructive": true,
+    "workingDir": "/your/project/directory"
+  },
+  "tools": {
+    "enabled": [
+      "bash",
+      "readFile",
+      "writeFile",
+      "editFile",
+      "searchFiles",
+      "searchCode",
+      "listFiles"
+    ]
+  },
+  "mcp": {
+    "enabled": true,
+    "servers": {
+      "filesystem": {
+        "enabled": false,
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/allowed/path"],
+        "env": {}
+      },
+      "git": {
+        "enabled": false,
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-git"],
+        "env": {}
+      },
+      "postgres": {
+        "enabled": false,
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-postgres", "postgresql://user:password@localhost:5432/dbname"],
+        "env": {}
+      },
+      "sqlite": {
+        "enabled": false,
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-sqlite", "/path/to/database.db"],
+        "env": {}
+      },
+      "brave-search": {
+        "enabled": false,
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+        "env": {
+          "BRAVE_API_KEY": "your-brave-api-key"
+        }
+      },
+      "github": {
+        "enabled": false,
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-github"],
+        "env": {
+          "GITHUB_TOKEN": "your-github-token"
+        }
+      },
+      "custom-api": {
+        "enabled": false,
+        "command": "node",
+        "args": ["/path/to/your/custom-mcp-server.js"],
+        "env": {
+          "API_KEY": "your-api-key",
+          "API_ENDPOINT": "https://your-api.com"
+        }
+      }
+    }
+  }
+}

@@ -91,6 +91,15 @@ Closer Code 是一个强大的命令行 AI 编程助理，可以帮助开发者�
 - 适应项目的编码风格
 - 持久化项目知识
 
+### MCP 集成 🆕
+- 连接到外部 MCP Servers 扩展能力
+- 支持官方 MCP Servers（filesystem、git、postgres、github 等）
+- 支持自定义 MCP Servers
+- 统一的工具调用接口
+- **项目本地配置** - 每个项目可以有独立的 MCP 配置
+
+查看 [MCP 集成文档](./docs/MCP_INTEGRATION.md) 和 [项目本地配置文档](./docs/PROJECT_LOCAL_CONFIG.md) 了解详情。
+
 ## 安装
 
 ### 前置要求
@@ -546,6 +555,12 @@ npm run dev
 ```bash
 # 测试模块
 npm test
+
+# 测试 MCP 功能
+npm run test:mcp
+
+# 测试项目本地配置
+node test/test-project-config.js
 ```
 
 ### 检查编译
@@ -651,6 +666,66 @@ cloco -b "创建一个 React 组件在 src/components/Button.tsx"
 - `analyzeError` - 分析错误
 - `runTests` - 运行测试
 - `planTask` - 规划任务
+
+### MCP 配置 🆕
+
+#### 全局配置
+
+在 `~/.closer-code/config.json` 中配置：
+
+```json
+{
+  "mcp": {
+    "enabled": true,
+    "servers": {
+      "filesystem": {
+        "enabled": true,
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/allowed/path"],
+        "env": {}
+      },
+      "git": {
+        "enabled": true,
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-git"],
+        "env": {}
+      }
+    }
+  }
+}
+```
+
+#### 项目本地配置
+
+在项目根目录创建 `.closer-code.json`：
+
+```json
+{
+  "mcp": {
+    "enabled": true,
+    "servers": {
+      "postgres": {
+        "enabled": true,
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-postgres", "postgresql://localhost/mydb"]
+      }
+    }
+  }
+}
+```
+
+**配置优先级**: 项目本地配置 > 全局配置 > 默认配置
+
+支持的 MCP Servers：
+- `@modelcontextprotocol/server-filesystem` - 文件系统访问
+- `@modelcontextprotocol/server-git` - Git 操作
+- `@modelcontextprotocol/server-postgres` - PostgreSQL 数据库
+- `@modelcontextprotocol/server-sqlite` - SQLite 数据库
+- `@modelcontextprotocol/server-brave-search` - Brave 搜索
+- `@modelcontextprotocol/server-github` - GitHub API
+- 任何自定义 MCP Server
+
+查看 [MCP 快速开始](./docs/MCP_QUICKSTART.md) 和 [项目本地配置](./docs/PROJECT_LOCAL_CONFIG.md) 了解更多。
 
 ## 故障排查
 

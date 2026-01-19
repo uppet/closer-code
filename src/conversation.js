@@ -11,7 +11,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { createAIClient } from './ai-client.js';
-import { setToolExecutorContext, getToolDefinitions } from './tools.js';
+import { setToolExecutorContext, getToolDefinitions, getAllToolDefinitions } from './tools.js';
 import { loadHistory, saveHistory, loadMemory } from './config.js';
 import { Plan, PlanType, PlanStatus, StepStatus } from './plan.js';
 import {
@@ -24,6 +24,7 @@ import {
   logToolCall,
   logSessionSummary
 } from './logger.js';
+import { getMCPClientManager } from './mcp/client.js';
 
 // 消息类型
 export const MessageType = {
@@ -83,6 +84,8 @@ export class Conversation {
     this.messages = [];
     this.currentPlan = null;
     this.isProcessing = false;
+    this.mcpEnabled = false;
+    this.mcpTools = [];
 
     // 初始化工具执行器上下文
     setToolExecutorContext(config);
@@ -96,8 +99,11 @@ export class Conversation {
     await initLogger();
     await logConfig(this.config);
 
-    // 加载历史
-    const history = loadHistory();
+    // 初始化 MCP Servers（如果启用）
+    await this.initializeMCP();
+
+    // 加载历史（使用项目路径）
+    const history = loadHistory(this.config.behavior.workingDir);
     // SDK 不接受 role: 'tool' 的消息，只保留 user 和 assistant 消息
     this.messages = history
       .filter(msg => msg.role === 'user' || msg.role === 'assistant')
@@ -109,6 +115,70 @@ export class Conversation {
     // 构建系统提示（现在是异步的）
     await this.buildSystemPrompt();
     return this;
+  }
+
+  /**
+   * 初始化 MCP Servers
+   */
+  async initializeMCP() {
+    // 检查是否启用 MCP
+    if (!this.config.mcp?.enabled) {
+      console.log('[MCP] MCP Client is disabled in config');
+      return;
+    }
+
+    if (!this.config.mcp?.servers || Object.keys(this.config.mcp.servers).length === 0) {
+      console.log('[MCP] No MCP Servers configured');
+      return;
+    }
+
+    try {
+      console.log('[MCP] Initializing MCP Client...');
+
+      const manager = getMCPClientManager();
+
+      // 显示配置来源
+      const { loadProjectConfig } = await import('./config.js');
+      const projectConfig = loadProjectConfig(this.config.behavior.workingDir);
+      if (Object.keys(projectConfig).length > 0) {
+        console.log('[MCP] Using project-local MCP configuration');
+      }
+
+      // 连接到所有配置的 MCP Servers
+      await manager.connectServers(this.config.mcp.servers);
+
+      // 获取所有 MCP 工具
+      this.mcpTools = manager.getAllTools();
+      this.mcpEnabled = true;
+
+      console.log(`[MCP] ✓ Loaded ${this.mcpTools.length} tools from MCP Servers`);
+
+      // 显示工具列表
+      if (this.mcpTools.length > 0) {
+        console.log('[MCP] Available MCP tools:');
+        for (const tool of this.mcpTools) {
+          console.log(`  - ${tool.name} [from ${tool.serverName}]`);
+        }
+      }
+    } catch (error) {
+      console.error(`[MCP] Failed to initialize: ${error.message}`);
+      console.error('[MCP] MCP features will be disabled');
+      this.mcpEnabled = false;
+    }
+  }
+
+  /**
+   * 获取所有工具（包括内置工具和 MCP 工具）
+   */
+  async getAllTools() {
+    if (this.mcpEnabled) {
+      return await getAllToolDefinitions(
+        this.config.tools.enabled,
+        true // include MCP tools
+      );
+    } else {
+      return getToolDefinitions(this.config.tools.enabled);
+    }
   }
 
   /**
@@ -150,8 +220,8 @@ export class Conversation {
       // 获取 AI 客户端
       const aiClient = await createAIClient(this.config);
 
-      // 获取工具定义（使用 Zod 工具）
-      const tools = getToolDefinitions(this.config.tools.enabled);
+      // 获取工具定义（包括内置工具和 MCP 工具）
+      const tools = await this.getAllTools();
 
       // 手动处理工具调用循环 - 全部使用流式 API
       let currentMessages = [...this.messages];
@@ -388,8 +458,8 @@ export class Conversation {
       // 获取 AI 客户端
       const aiClient = await createAIClient(this.config);
 
-      // 获取工具定义
-      const tools = getToolDefinitions(this.config.tools.enabled);
+      // 获取工具定义（包括内置工具和 MCP 工具）
+      const tools = await this.getAllTools();
 
       // 流式响应处理
       let fullResponse = {
