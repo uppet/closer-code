@@ -313,7 +313,8 @@ function App() {
   const [lastCtrlC, setLastCtrlC] = useState(0);
   const [showExitHint, setShowExitHint] = useState(false);
   const [abortMessage, setAbortMessage] = useState(null); // 中止任务的提示
-  const abortControllerRef = useRef(null);
+  const [aborting, setAborting] = useState(false); // 是否正在中止
+  const conversationRef = useRef(null); // Conversation 对象引用
   const inputRef = useRef(''); // 用于在 useInput 中获取最新的 input 值
   // 历史记录管理器
   const [inputHistory] = useState(() => createHistoryManager({ maxSize: 100 }));
@@ -357,27 +358,21 @@ function App() {
 
   // 键盘输入处理（用于滚动和 Ctrl+C）
   useInput((input, key) => {
+    // 处理 Ctrl+Z - 挂起程序（发送 SIGTSTP 信号）
+    if (key.ctrl && input === 'z') {
+      console.log('\n⏸️  程序已挂起 (按 fg 命令恢复)\n');
+      // 发送 SIGTSTP 信号给自己，让操作系统挂起进程
+      process.kill(process.pid, 'SIGTSTP');
+      return;
+    }
+
     // 处理 Ctrl+C 和 ESC（始终有效，即使在输入模式）
     if ((key.ctrl && input === 'c') || key.escape) {
       const now = Date.now();
 
       if (isProcessing) {
         // 如果 AI 正在执行，中止对话
-        if (abortControllerRef.current) {
-          abortControllerRef.current.abort();
-          abortControllerRef.current = null;
-        }
-        setIsProcessing(false);
-        setActivity('❌ 用户中止了 AI 执行');
-        setAbortMessage('❌ AI 执行已被中止');
-        setThinking(prev => [...prev, `❌ [${new Date().toLocaleTimeString()}] 用户中止了 AI 执行`]);
-
-        // 3秒后清除中止提示
-        setTimeout(() => {
-          setAbortMessage(null);
-          setActivity(null);
-        }, 3000);
-
+        handleAbort();
         return;
       }
 
@@ -487,6 +482,7 @@ function App() {
 
         const conv = await createConversation(cfg);
         setConversation(conv);
+        conversationRef.current = conv; // 保存引用
 
         // 欢迎消息
         const welcomeMsg = {
@@ -544,9 +540,50 @@ Type your message or command to get started.`
     return Math.ceil(chineseChars * 2.5 + englishChars * 0.25);
   }, []);
 
+  /**
+   * 处理 Ctrl+C 中止
+   * 使用 Abort Fence 机制中止当前对话
+   */
+  const handleAbort = useCallback(async () => {
+    if (!isProcessing || aborting) {
+      return;
+    }
+
+    setAborting(true);
+    setActivity('⚠️ 正在中止任务...');
+    setThinking(prev => [...prev, `⚠️ [${new Date().toLocaleTimeString()}] 正在中止当前任务...`]);
+
+    try {
+      if (conversationRef.current) {
+        // 调用 Conversation 的 abortCurrentPhase 方法
+        await conversationRef.current.abortCurrentPhase();
+      }
+    } catch (error) {
+      console.error('[Abort Error]', error.message);
+      setThinking(prev => [...prev, `❌ [${new Date().toLocaleTimeString()}] 中止失败: ${error.message}`]);
+    } finally {
+      setAborting(false);
+      setIsProcessing(false);
+      setActivity('❌ 任务已中止');
+      setAbortMessage('❌ AI 执行已被中止');
+
+      // 3秒后清除中止提示
+      setTimeout(() => {
+        setAbortMessage(null);
+        setActivity(null);
+      }, 3000);
+    }
+  }, [isProcessing, aborting]);
+
   // 处理用户输入
   const handleSubmit = useCallback(async (value) => {
-    if (!conversation || isProcessing) return;
+    if (!conversation || isProcessing) {
+      // 如果正在中止，等待
+      if (aborting) {
+        setActivity('⏳ 等待中止完成...');
+      }
+      return;
+    }
 
     setInput('');
     setIsProcessing(true);
@@ -569,14 +606,10 @@ Type your message or command to get started.`
     }
 
     try {
-      // 创建 AbortController 用于中止
-      const abortController = new AbortController();
-      abortControllerRef.current = abortController;
-      
       // 记录思考开始
       setThinking(prev => [...prev, `🤔 [${new Date().toLocaleTimeString()}] 开始分析用户请求...`]);
-      
-      // 发送到 AI
+
+      // 发送到 AI（Conversation 内部会管理 AbortController）
       setActivity('🤔 AI 正在思考...');
       const response = await conversation.sendMessage(
         value,
@@ -741,14 +774,18 @@ Type your message or command to get started.`
           }
         }
       );
-      
-      abortControllerRef.current = null;
+
+      // 检查是否是 abort 结果
+      if (response.aborted) {
+        setThinking(prev => [...prev, `❌ [${new Date().toLocaleTimeString()}] 对话已中止: ${response.abortReason}`]);
+        return;
+      }
 
       // 使用API返回的准确token使用信息
       if (response.usage) {
         const { input_tokens = 0, output_tokens = 0 } = response.usage;
         updateTokenStats(input_tokens, output_tokens);
-        
+
         // 在thinking中记录准确的token使用
         setThinking(prev => [...prev, `📊 [${new Date().toLocaleTimeString()}] API Token使用: 输入=${input_tokens}, 输出=${output_tokens}`]);
       } else {

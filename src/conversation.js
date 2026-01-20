@@ -89,6 +89,13 @@ export class Conversation {
     this.mcpEnabled = false;
     this.mcpTools = [];
 
+    // Abort Fence 机制
+    this.conversationPhaseId = 0;  // 当前对话阶段 ID（递增）
+    this.activePhaseId = null;     // 当前活跃的阶段 ID
+    this.abortFence = null;        // abort fence（要中止的阶段 ID）
+    this.pendingAbortHandlers = new Map(); // 待处理的 abort 处理器
+    this.abortTimeout = 5000;      // abort 超时时间（毫秒）
+
     // 初始化工具执行器上下文
     setToolExecutorContext(config);
 
@@ -127,6 +134,121 @@ export class Conversation {
     await this.buildSystemPrompt();
     return this;
   }
+
+  /**
+   * ==================== Abort Fence 机制 ====================
+   */
+
+  /**
+   * 开始新的对话阶段
+   * @returns {number} 新的阶段 ID
+   */
+  beginPhase() {
+    this.conversationPhaseId++;
+    this.activePhaseId = this.conversationPhaseId;
+    console.log(`[AbortFence] Phase ${this.activePhaseId} started`);
+    return this.activePhaseId;
+  }
+
+  /**
+   * 检查指定阶段是否已被 abort
+   * @param {number} phaseId - 要检查的阶段 ID
+   * @returns {boolean} 如果阶段已被 abort 则返回 true
+   */
+  isAborted(phaseId) {
+    const aborted = this.abortFence !== null && phaseId <= this.abortFence;
+    if (aborted) {
+      console.log(`[AbortFence] Phase ${phaseId} is aborted (fence: ${this.abortFence})`);
+    }
+    return aborted;
+  }
+
+  /**
+   * 检查当前活跃阶段是否已被 abort
+   * @returns {boolean} 如果当前阶段已被 abort 则返回 true
+   */
+  isCurrentPhaseAborted() {
+    return this.activePhaseId !== null && this.isAborted(this.activePhaseId);
+  }
+
+  /**
+   * 中止当前对话阶段
+   * @returns {Promise<void>}
+   */
+  async abortCurrentPhase() {
+    if (!this.activePhaseId) {
+      console.log('[AbortFence] No active phase to abort');
+      return;
+    }
+
+    const fence = this.activePhaseId;
+    console.log(`[AbortFence] Aborting phase ${fence} and all earlier phases`);
+    this.abortFence = fence;
+
+    // 等待所有待处理的 abort 操作完成（带超时）
+    try {
+      const abortPromises = Array.from(this.pendingAbortHandlers.values());
+      if (abortPromises.length > 0) {
+        console.log(`[AbortFence] Waiting for ${abortPromises.length} abort handlers to complete...`);
+        await Promise.race([
+          Promise.allSettled(abortPromises),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Abort timeout')), this.abortTimeout)
+          )
+        ]);
+      }
+    } catch (error) {
+      console.warn(`[AbortFence] Abort handlers timeout or error: ${error.message}`);
+    } finally {
+      // 清理
+      this.pendingAbortHandlers.clear();
+      this.activePhaseId = null;
+      this.isProcessing = false;  // 🔑 重置处理标志，允许新对话
+      console.log('[AbortFence] Abort completed, isProcessing reset to false');
+    }
+  }
+
+  /**
+   * 注册 abort 处理器
+   * @param {string} key - 处理器的唯一标识
+   * @param {Function} handler - abort 处理函数，返回 Promise
+   */
+  registerAbortHandler(key, handler) {
+    if (typeof handler === 'function') {
+      this.pendingAbortHandlers.set(key, handler());
+    }
+  }
+
+  /**
+   * 清除 abort 处理器
+   * @param {string} key - 处理器的唯一标识
+   */
+  unregisterAbortHandler(key) {
+    this.pendingAbortHandlers.delete(key);
+  }
+
+  /**
+   * 创建 abort 结果
+   * @param {string} reason - abort 原因
+   * @returns {Object} abort 结果对象
+   */
+  createAbortResult(reason = 'user_aborted') {
+    return {
+      content: '',
+      toolCalls: [],
+      usage: {
+        input_tokens: 0,
+        output_tokens: 0,
+        total_tokens: 0
+      },
+      aborted: true,
+      abortReason: reason
+    };
+  }
+
+  /**
+   * ==================== 原有方法 ====================
+   */
 
   /**
    * 初始化 MCP Servers
@@ -218,7 +340,22 @@ export class Conversation {
     }
     this.isProcessing = true;
 
+    // 开始新的对话阶段
+    const phaseId = this.beginPhase();
+
+    // 创建 AbortController（用于网络请求中止）
+    const abortController = new AbortController();
+    this.registerAbortHandler('network', () => {
+      abortController.abort();
+    });
+
     try {
+      // 检查初始 abort
+      if (this.isAborted(phaseId)) {
+        console.log(`[AbortFence] Phase ${phaseId} aborted before processing`);
+        return this.createAbortResult('aborted_before_processing');
+      }
+
       // 记录用户消息
       await logUserMessage(userMessage);
 
@@ -255,6 +392,12 @@ export class Conversation {
       }
 
       while (true) {
+        // 检查 abort（每次循环前）
+        if (this.isAborted(phaseId)) {
+          console.log(`[AbortFence] Phase ${phaseId} aborted in tool loop`);
+          return this.createAbortResult('aborted_in_loop');
+        }
+
         // 使用流式 API 发送消息
         const response = await aiClient.chatStream(
           currentMessages,
@@ -262,9 +405,15 @@ export class Conversation {
             system: this.systemPrompt,
             tools: tools,
             temperature: 0.7,
-            thinking: process.env.CLOSER_THINKING_ENABLED !== '0' ? { type: 'enabled', budget_tokens: 20000 } : { type: 'disabled' }
+            thinking: process.env.CLOSER_THINKING_ENABLED !== '0' ? { type: 'enabled', budget_tokens: 20000 } : { type: 'disabled' },
+            signal: abortController.signal  // 传递 abort signal
           },
           (chunk) => {
+            // 每个 chunk 都检查 abort
+            if (this.isAborted(phaseId)) {
+              throw new Error('Stream aborted');
+            }
+
             // 处理流式事件
             if (chunk.type === 'thinking') {
               if (typeof onProgress === 'function') {
@@ -450,19 +599,44 @@ export class Conversation {
           let result;
           let executionSuccess = true;
 
-          try {
-            result = await tool.run(block.input);
-          } catch (error) {
-            // 工具执行失败，返回错误信息
-            executionSuccess = false;
+          // 在工具执行前检查 abort
+          if (this.isAborted(phaseId)) {
+            console.log(`[AbortFence] Phase ${phaseId} aborted before tool execution: ${block.name}`);
             result = JSON.stringify({
               success: false,
-              error: error.message,
-              errorType: error.constructor.name,
+              aborted: true,
+              error: 'Tool execution aborted by user',
               content: null
             });
+            executionSuccess = false;
+          } else {
+            try {
+              result = await tool.run(block.input);
 
-            console.error(`[Tool Execution Error] ${block.name}:`, error.message);
+              // 工具执行后再次检查 abort（防止长时间操作）
+              if (this.isAborted(phaseId)) {
+                console.log(`[AbortFence] Phase ${phaseId} aborted after tool execution: ${block.name}`);
+                result = JSON.stringify({
+                  success: false,
+                  aborted: true,
+                  error: 'Tool execution aborted by user',
+                  content: null
+                });
+                executionSuccess = false;
+              }
+            } catch (error) {
+              // 工具执行失败，返回错误信息
+              executionSuccess = false;
+              result = JSON.stringify({
+                success: false,
+                aborted: false,
+                error: error.message,
+                errorType: error.constructor.name,
+                content: null
+              });
+
+              console.error(`[Tool Execution Error] ${block.name}:`, error.message);
+            }
           }
 
           // 记录工具调用
@@ -571,10 +745,19 @@ export class Conversation {
         }
       };
     } catch (error) {
+      // 检查是否是 abort 导致的错误
+      if (error.name === 'AbortError' || error.message === 'Stream aborted' || this.isAborted(phaseId)) {
+        console.log(`[AbortFence] Phase ${phaseId} aborted with error: ${error.message}`);
+        await logAIError(new Error('User aborted the conversation'));
+        return this.createAbortResult('aborted_by_user');
+      }
+
+      // 其他错误正常抛出
       await logAIError(error);
       throw error;
     } finally {
       this.isProcessing = false;
+      this.unregisterAbortHandler('network');  // 清理 abort 处理器
     }
   }
 
@@ -698,6 +881,13 @@ export class Conversation {
   clearHistory() {
     this.messages = [];
     saveHistory([]);
+
+    // 重置 Abort Fence 状态
+    this.conversationPhaseId = 0;
+    this.activePhaseId = null;
+    this.abortFence = null;
+    this.pendingAbortHandlers.clear();
+    console.log('[AbortFence] Fence reset (clear history)');
   }
 
   /**
