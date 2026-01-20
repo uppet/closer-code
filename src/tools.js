@@ -371,55 +371,148 @@ export function getToolSchemaDefinitions(enabledTools) {
 }
 
 /**
- * 生成工具执行的简短摘要
+ * 格式化文件大小
+ */
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+/**
+ * 生成工具执行的详细信息（双行显示）
  * @param {string} toolName - 工具名称
  * @param {Object} input - 工具输入参数
  * @param {Object} result - 工具执行结果
- * @returns {string} 简短摘要
+ * @returns {Object} {summary: string, detailInfo: string}
  */
 export function generateToolSummary(toolName, input, result) {
   const success = result?.success;
+  let summary, detailInfo;
 
   switch (toolName) {
     case 'bash':
       const cmd = input.command || '';
-      // 提取命令和第一个参数
       const parts = cmd.trim().split(/\s+/);
       const command = parts[0] || 'bash';
-      const arg1 = parts[1] ? parts[1].substring(0, 20) : '';
-      return success ? `✓ ${command} ${arg1}` : `✗ ${command}`;
+
+      summary = success ? `✓ ${command}` : `✗ ${command}`;
+
+      // 详细信息：完整命令（最多60字符）
+      detailInfo = cmd.length > 60
+        ? cmd.substring(0, 57) + '...'
+        : cmd;
+
+      // 添加退出码
+      if (result.exitCode !== undefined) {
+        detailInfo += ` [exit: ${result.exitCode}]`;
+      }
+
+      // 添加错误信息
+      if (!success && result.error) {
+        detailInfo += ` - ${result.error}`;
+      }
+
+      return { summary, detailInfo };
 
     case 'readFile':
+    case 'readFileLines':
+    case 'readFileTail':
       const filePath = input.filePath || '';
-      const fileName = filePath.split('/').pop().substring(0, 20);
-      return success ? `📖 ${fileName}` : `✗ ${fileName}`;
+      const fileName = filePath.split('/').pop();
+      summary = success ? `📖 ${fileName}` : `✗ ${fileName}`;
+
+      // 详细信息：完整路径
+      detailInfo = filePath;
+
+      // 添加大小信息
+      if (result.size) {
+        detailInfo += ` (${formatSize(result.size)})`;
+      }
+
+      // 添加截断信息
+      if (result.truncated) {
+        detailInfo += ` [truncated]`;
+      }
+
+      // 添加行信息
+      if (result.lineCount) {
+        detailInfo += ` [${result.lineCount} lines]`;
+      }
+
+      return { summary, detailInfo };
 
     case 'writeFile':
       const writePath = input.filePath || '';
-      const writeFileName = writePath.split('/').pop().substring(0, 20);
-      return success ? `✍️ ${writeFileName}` : `✗ ${writeFileName}`;
+      const writeFileName = writePath.split('/').pop();
+      summary = success ? `✍️ ${writeFileName}` : `✗ ${writeFileName}`;
+
+      // 详细信息：完整路径 + 写入大小
+      detailInfo = writePath;
+      if (result.size) {
+        detailInfo += ` (${formatSize(result.size)} written)`;
+      }
+
+      return { summary, detailInfo };
 
     case 'editFile':
+    case 'regionConstrainedEdit':
       const editPath = input.filePath || '';
-      const editFileName = editPath.split('/').pop().substring(0, 20);
-      return success ? `✏️ ${editFileName}` : `✗ ${editFileName}`;
+      const editFileName = editPath.split('/').pop();
+      summary = success ? `✏️ ${editFileName}` : `✗ ${editFileName}`;
+
+      // 详细信息：完整路径 + 修改次数
+      detailInfo = editPath;
+      if (result.replacements !== undefined) {
+        detailInfo += ` [${result.replacements} replacement${result.replacements > 1 ? 's' : ''}]`;
+      }
+
+      // 区域信息
+      if (result.region) {
+        detailInfo += ` [lines ${result.region.begin}-${result.region.end}]`;
+      }
+
+      return { summary, detailInfo };
 
     case 'searchFiles':
       const pattern = input.pattern || '';
-      const shortPattern = pattern.substring(0, 15);
-      return success ? `🔍 ${shortPattern}` : `✗ search`;
+      const shortPattern = pattern.substring(0, 30);
+      summary = success ? `🔍 ${shortPattern}` : `✗ search`;
+
+      detailInfo = pattern;
+      if (result.count !== undefined) {
+        detailInfo += ` [${result.count} files]`;
+      }
+
+      return { summary, detailInfo };
 
     case 'searchCode':
-      const query = input.query || '';
-      const shortQuery = query.substring(0, 15);
-      return success ? `🔎 ${shortQuery}` : `✗ search`;
+      const query = input.pattern || '';
+      const shortQuery = query.substring(0, 30);
+      summary = success ? `🔎 ${shortQuery}` : `✗ search`;
+
+      detailInfo = `Pattern: ${query}`;
+      if (result.matchCount !== undefined) {
+        detailInfo += ` [${result.matchCount} matches]`;
+      }
+
+      return { summary, detailInfo };
 
     case 'listFiles':
-      const dirPath = input.path || '.';
+      const dirPath = input.dirPath || '.';
       const dirName = dirPath.split('/').pop() || '.';
-      return success ? `📁 ${dirName}` : `✗ ${dirName}`;
+      summary = success ? `📁 ${dirName}` : `✗ ${dirName}`;
+
+      detailInfo = dirPath;
+      if (result.files) {
+        detailInfo += ` [${result.files.length} items]`;
+      }
+
+      return { summary, detailInfo };
 
     default:
-      return success ? `✓ ${toolName}` : `✗ ${toolName}`;
+      summary = success ? `✓ ${toolName}` : `✗ ${toolName}`;
+      detailInfo = JSON.stringify(input).substring(0, 60);
+      return { summary, detailInfo };
   }
 }

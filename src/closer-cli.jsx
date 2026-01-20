@@ -8,6 +8,7 @@ import { render, Box, Text } from 'ink';
 import { useInput } from 'ink';
 import { createConversation } from './conversation.js';
 import { getConfig, updateConfig } from './config.js';
+import { generateToolSummary } from './tools.js';
 import { createShortcutManager } from './shortcuts.js';
 import { createSnippetManager, SNIPPET_TEMPLATES } from './snippets.js';
 import { createHistoryManager } from './input/history.js';
@@ -107,13 +108,20 @@ function TaskProgress({ plan }) {
 }
 
 // 工具执行显示组件
-function ToolExecution({ summary, timestamp }) {
+function ToolExecution({ summary, detailInfo, timestamp }) {
   return (
     <Box flexDirection="column" marginBottom={1} paddingX={1} borderStyle="single" borderColor="gray" width="100%">
+      {/* 第一行：简短摘要 */}
       <Box width="100%">
         <Text>{summary}</Text>
         <Text dim> [{timestamp}]</Text>
       </Box>
+      {/* 第二行：详细信息 */}
+      {detailInfo && (
+        <Box width="100%">
+          <Text dim color="gray">{detailInfo}</Text>
+        </Box>
+      )}
     </Box>
   );
 }
@@ -725,49 +733,18 @@ Type your message or command to get started.`
               const newExecs = [...prev];
               const lastExec = newExecs[newExecs.length - 1];
 
-              // 生成简短摘要（不使用完整数据）
-              let summary = '';
-              const tool = lastExec.tool;
-              const input = lastExec.input || {};
-              const result = progress.result;
-
-              // 根据工具类型生成摘要
-              if (tool === 'bash') {
-                const cmd = input.command || '';
-                const parts = cmd.trim().split(/\s+/);
-                const command = parts[0] || 'bash';
-                const arg1 = parts[1] ? parts[1].substring(0, 20) : '';
-                summary = result.success
-                  ? `✓ ${command} ${arg1}`
-                  : `✗ ${command}`;
-              } else if (tool === 'readFile') {
-                const filePath = input.filePath || '';
-                const fileName = filePath.split('/').pop().substring(0, 20);
-                summary = result.success
-                  ? `📖 ${fileName}`
-                  : `✗ ${fileName}`;
-              } else if (tool === 'writeFile') {
-                const filePath = input.filePath || '';
-                const fileName = filePath.split('/').pop().substring(0, 20);
-                summary = result.success
-                  ? `✍️ ${fileName}`
-                  : `✗ ${fileName}`;
-              } else if (tool === 'editFile') {
-                const filePath = input.filePath || '';
-                const fileName = filePath.split('/').pop().substring(0, 20);
-                summary = result.success
-                  ? `✏️ ${fileName}`
-                  : `✗ ${fileName}`;
-              } else {
-                summary = result.success
-                  ? `✓ ${tool}`
-                  : `✗ ${tool}`;
-              }
+              // 使用 generateToolSummary 生成双行显示
+              const { summary, detailInfo } = generateToolSummary(
+                lastExec.tool,
+                lastExec.input || {},
+                progress.result
+              );
 
               newExecs[newExecs.length - 1] = {
                 ...lastExec,
                 result: progress.result,
-                summary: summary
+                summary,
+                detailInfo
               };
               return newExecs;
             });
