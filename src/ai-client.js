@@ -128,20 +128,37 @@ export class AnthropicClient {
    * 使用 toolRunner 自动处理工具调用循环
    * 这是 SDK 提供的高级功能，可以自动处理工具的调用和结果返回
    *
+   * 注意：toolRunner 内置了错误处理，即使工具执行失败也会继续执行
+   *
    * @param {Array} messages - 消息数组
    * @param {Array} tools - 工具数组（使用 Zod 定义的 betaZodTool）
    * @param {Object} options - 选项
    * @returns {Promise} 最终消息（所有工具调用完成后）
    */
   async chatWithTools(messages, tools, options = {}) {
-    return await this.client.beta.messages.toolRunner({
-      model: this.model,
-      max_tokens: this.maxTokens,
-      system: options.system,
-      messages: messages,
-      tools: tools,
-      temperature: options.temperature
-    });
+    try {
+      return await this.client.beta.messages.toolRunner({
+        model: this.model,
+        max_tokens: this.maxTokens,
+        system: options.system,
+        messages: messages,
+        tools: tools,
+        temperature: options.temperature
+      });
+    } catch (error) {
+      // toolRunner 的错误处理
+      console.error('[Anthropic toolRunner Error]:', error.message);
+
+      // 检查是否是工具调用相关的错误
+      if (error.message.includes('tool') || error.type === 'tool_error') {
+        // 工具调用错误，返回部分结果
+        console.error('[Anthropic Tool Error]: Tool execution failed');
+        throw error;
+      } else {
+        // 其他错误，直接抛出
+        throw error;
+      }
+    }
   }
 
   /**

@@ -1,12 +1,14 @@
 /**
  * 对话管理器（使用 SDK）
  *
- * 使用 @anthropic-ai/sdk 的 toolRunner 自动处理工具调用循环
+ * 注意：虽然 SDK 提供了 toolRunner 功能，但为了更好地控制流式响应
+ * 和进度回调，这里使用手动处理工具调用循环的方式。
+ *
  * 优势：
- * - 无需手工解析工具调用
- * - 无需清理工具调用标记
- * - 无需复杂的正则表达式
- * - 代码量减少 80%
+ * - 完全控制流式响应和进度回调
+ * - 支持自定义的进度事件（thinking, token, tool_start 等）
+ * - 更好的错误处理和恢复机制
+ * - 支持流式更新节流（Buffer + Throttle）
  */
 
 import Anthropic from '@anthropic-ai/sdk';
@@ -385,11 +387,58 @@ export class Conversation {
           // 查找对应的 betaZodTool
           const tool = tools.find(t => t.name === block.name);
           if (!tool) {
-            throw new Error(`Tool ${block.name} not found`);
+            // 工具不存在，也要返回错误结果（重要！）
+            const errorResult = JSON.stringify({
+              success: false,
+              error: `Tool ${block.name} not found`,
+              content: null
+            });
+
+            // 添加错误结果到 currentMessages
+            currentMessages.push({
+              role: 'user',
+              content: [{
+                type: 'tool_result',
+                tool_use_id: block.id,
+                content: errorResult,
+                isError: true
+              }]
+            });
+
+            // 同时添加到 this.messages
+            this.messages.push({
+              role: 'user',
+              content: [{
+                type: 'tool_result',
+                tool_use_id: block.id,
+                content: errorResult,
+                isError: true
+              }]
+            });
+
+            // 记录错误
+            await logToolCall(block.name, block.input, errorResult);
+            continue;
           }
 
-          // 执行工具
-          const result = await tool.run(block.input);
+          // 执行工具（使用 try-catch 确保即使失败也返回结果）
+          let result;
+          let executionSuccess = true;
+
+          try {
+            result = await tool.run(block.input);
+          } catch (error) {
+            // 工具执行失败，返回错误信息
+            executionSuccess = false;
+            result = JSON.stringify({
+              success: false,
+              error: error.message,
+              errorType: error.constructor.name,
+              content: null
+            });
+
+            console.error(`[Tool Execution Error] ${block.name}:`, error.message);
+          }
 
           // 记录工具调用
           await logToolCall(block.name, block.input, result);
@@ -404,20 +453,33 @@ export class Conversation {
           }
 
           if (typeof onProgress === 'function') {
-            onProgress({
-              type: 'tool_complete',
-              tool: block.name,
-              result: JSON.parse(result)
-            });
+            try {
+              onProgress({
+                type: 'tool_complete',
+                tool: block.name,
+                result: executionSuccess ? JSON.parse(result) : JSON.parse(result),
+                success: executionSuccess
+              });
+            } catch (parseError) {
+              // JSON 解析失败，返回原始字符串
+              onProgress({
+                type: 'tool_complete',
+                tool: block.name,
+                result: result,
+                success: executionSuccess
+              });
+            }
           }
 
           // 添加工具结果到 currentMessages（用于下一次 AI 请求）
+          // ⚠️ 关键：无论成功失败，都必须添加结果
           currentMessages.push({
             role: 'user',
             content: [{
               type: 'tool_result',
               tool_use_id: block.id,
-              content: result
+              content: result,
+              isError: !executionSuccess
             }]
           });
 
@@ -427,7 +489,8 @@ export class Conversation {
             content: [{
               type: 'tool_result',
               tool_use_id: block.id,
-              content: result
+              content: result,
+              isError: !executionSuccess
             }]
           });
         }

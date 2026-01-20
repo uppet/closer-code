@@ -190,53 +190,73 @@ export class OpenAIClient {
     let currentToolCalls = [];
     let accumulatedText = '';
 
-    for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta;
+    try {
+      for await (const chunk of stream) {
+        try {
+          const delta = chunk.choices[0]?.delta;
 
-      if (!delta) continue;
+          if (!delta) continue;
 
-      // 处理文本内容
-      if (delta.content) {
-        accumulatedText += delta.content;
+          // 处理文本内容
+          if (delta.content) {
+            accumulatedText += delta.content;
 
-        if (typeof onChunk === 'function') {
-          onChunk({
-            type: 'text',
-            delta: delta.content,
-            snapshot: accumulatedText
-          });
-        }
-      }
+            if (typeof onChunk === 'function') {
+              onChunk({
+                type: 'text',
+                delta: delta.content,
+                snapshot: accumulatedText
+              });
+            }
+          }
 
-      // 处理工具调用
-      if (delta.tool_calls) {
-        for (const toolCall of delta.tool_calls) {
-          if (toolCall.index !== undefined) {
-            if (!currentToolCalls[toolCall.index]) {
-              currentToolCalls[toolCall.index] = {
-                id: toolCall.id,
-                type: 'function',
-                function: {
-                  name: toolCall.function?.name || '',
-                  arguments: toolCall.function?.arguments || ''
+          // 处理工具调用
+          if (delta.tool_calls) {
+            for (const toolCall of delta.tool_calls) {
+              if (toolCall.index !== undefined) {
+                if (!currentToolCalls[toolCall.index]) {
+                  currentToolCalls[toolCall.index] = {
+                    id: toolCall.id,
+                    type: 'function',
+                    function: {
+                      name: toolCall.function?.name || '',
+                      arguments: toolCall.function?.arguments || ''
+                    }
+                  };
+                } else {
+                  // 累积参数
+                  if (toolCall.function?.arguments) {
+                    currentToolCalls[toolCall.index].function.arguments +=
+                      toolCall.function.arguments;
+                  }
                 }
-              };
-            } else {
-              // 累积参数
-              if (toolCall.function?.arguments) {
-                currentToolCalls[toolCall.index].function.arguments +=
-                  toolCall.function.arguments;
               }
             }
           }
+
+          // 检查是否完成
+          if (chunk.choices[0]?.finish_reason === 'stop' ||
+              chunk.choices[0]?.finish_reason === 'tool_calls') {
+            break;
+          }
+        } catch (chunkError) {
+          console.error('[OpenAI Stream Chunk Error]:', chunkError.message);
+          // 继续处理下一个 chunk，不中断整个流
+          continue;
         }
       }
+    } catch (streamError) {
+      console.error('[OpenAI Stream Error]:', streamError.message);
+      console.error('[OpenAI Stream Error Type]:', streamError.constructor.name);
 
-      // 检查是否完成
-      if (chunk.choices[0]?.finish_reason === 'stop' ||
-          chunk.choices[0]?.finish_reason === 'tool_calls') {
-        break;
+      // 如果是网络错误或流中断，仍然返回已累积的内容
+      if (streamError.name === 'AbortError' || streamError.name === 'NetworkError') {
+        console.warn('[OpenAI Stream] Stream interrupted, returning accumulated content');
+      } else {
+        // 其他错误也尝试返回已累积的内容
+        console.warn('[OpenAI Stream] Error occurred, returning accumulated content');
       }
+      // 不抛出异常，继续处理已累积的内容
     }
 
     // 构建响应内容
@@ -249,12 +269,25 @@ export class OpenAIClient {
 
     if (currentToolCalls.length > 0) {
       for (const toolCall of currentToolCalls) {
-        fullResponse.content.push({
-          type: 'tool_use',
-          id: toolCall.id,
-          name: toolCall.function.name,
-          input: JSON.parse(toolCall.function.arguments)
-        });
+        try {
+          fullResponse.content.push({
+            type: 'tool_use',
+            id: toolCall.id,
+            name: toolCall.function.name,
+            input: JSON.parse(toolCall.function.arguments)
+          });
+        } catch (parseError) {
+          console.error('[OpenAI Tool Parse Error]:', parseError.message);
+          console.error('[OpenAI Tool Arguments]:', toolCall.function.arguments);
+          // 返回空对象作为降级处理
+          fullResponse.content.push({
+            type: 'tool_use',
+            id: toolCall.id,
+            name: toolCall.function.name,
+            input: {},
+            parseError: true
+          });
+        }
       }
     }
 
@@ -488,10 +521,30 @@ export function createOpenAITool(anthropicTool) {
     description: anthropicTool.description,
     parameters: anthropicTool.input_schema,
     execute: async (input) => {
-      // 调用原始工具的 run 方法
-      const result = await anthropicTool.run(input);
-      // 返回解析后的结果
-      return JSON.parse(result);
+      try {
+        // 调用原始工具的 run 方法
+        const result = await anthropicTool.run(input);
+
+        // 尝试解析 JSON
+        try {
+          return JSON.parse(result);
+        } catch (parseError) {
+          // 如果解析失败，检查结果是否已经是对象
+          if (typeof result === 'object') {
+            return result;
+          }
+          // 返回原始字符串
+          return { result: result };
+        }
+      } catch (error) {
+        // 工具执行失败，返回错误信息
+        console.error(`[OpenAI Tool Execution Error] ${anthropicTool.name}:`, error.message);
+        return {
+          success: false,
+          error: error.message,
+          errorType: error.constructor.name
+        };
+      }
     }
   });
 }
