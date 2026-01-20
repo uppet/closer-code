@@ -57,16 +57,19 @@ const DEFAULT_CONFIG = {
   // 工具配置
   tools: {
     enabled: [
-      'bash',           // 执行 shell 命令
-      'readFile',       // 读取文件
-      'writeFile',      // 写入文件
-      'editFile',       // 编辑文件
-      'searchFiles',    // 搜索文件
-      'searchCode',     // 搜索代码
-      'listFiles',      // 列出文件
-      'analyzeError',   // 分析错误
-      'runTests',       // 运行测试
-      'planTask'        // 规划任务
+      'bash',                    // 执行 shell 命令
+      'readFile',                // 读取文件（智能分段）
+      'readFileLines',           // 读取文件指定行范围
+      'readFileTail',            // 读取文件末尾（日志文件）
+      'writeFile',               // 写入文件
+      'editFile',                // 编辑文件（全文替换）
+      'regionConstrainedEdit',   // 编辑文件（区域约束精确替换）
+      'searchFiles',             // 搜索文件
+      'searchCode',              // 搜索代码
+      'listFiles',               // 列出文件
+      'analyzeError',            // 分析错误
+      'runTests',                // 运行测试
+      'planTask'                 // 规划任务
     ]
   },
 

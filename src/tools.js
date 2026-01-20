@@ -307,6 +307,137 @@ export const editFileTool = betaZodTool({
 });
 
 /**
+ * 区域约束编辑工具（精确替换）
+ */
+export const regionConstrainedEditTool = betaZodTool({
+  name: 'regionConstrainedEdit',
+  description: `Edit a file within a specific line range. Perfect for precise edits.
+
+Use cases:
+- Replace text in a specific function
+- Modify configuration sections
+- Edit code blocks without affecting other parts
+
+Line numbers are 1-based. Negative numbers count from the end (-1 = last line).
+
+Examples:
+- Lines 10-20: {begin: 10, end: 20}
+- Last 10 lines: {begin: -10}
+- With regex: {isRegex: true}`,
+  inputSchema: z.object({
+    filePath: z.string().describe('File path'),
+    begin: z.number().describe('Start line (1-based, negative for from end)'),
+    end: z.number().optional().describe('End line (exclusive, default: end of file)'),
+    oldText: z.string().describe('Text to find (or regex pattern)'),
+    newText: z.string().describe('Replacement text'),
+    isRegex: z.boolean().optional().describe('Treat oldText as regex pattern'),
+    replaceAll: z.boolean().optional().describe('Replace all occurrences in region')
+  }),
+  run: async (input) => {
+    if (!toolExecutorContext) {
+      throw new Error('Tool executor context not initialized');
+    }
+
+    const fullPath = path.resolve(toolExecutorContext.workingDir, input.filePath);
+    const content = await fs.readFile(fullPath, 'utf-8');
+
+    // 分割为行数组
+    const lines = content.split('\n');
+    const totalLines = lines.length;
+
+    // 计算实际行号（处理负数）
+    const startLine = input.begin < 0
+      ? totalLines + input.begin + 1
+      : input.begin;
+    const endLine = input.end === undefined
+      ? totalLines
+      : (input.end < 0 ? totalLines + input.end + 1 : input.end);
+
+    // 验证行号
+    if (startLine < 1 || startLine > totalLines) {
+      return JSON.stringify({
+        success: false,
+        error: `Invalid start line: ${startLine}. File has ${totalLines} lines.`
+      });
+    }
+
+    if (endLine < startLine || endLine > totalLines) {
+      return JSON.stringify({
+        success: false,
+        error: `Invalid end line: ${endLine}. Must be between ${startLine} and ${totalLines}.`
+      });
+    }
+
+    // 提取区域内容（转换为 0-based）
+    const beforeRegion = lines.slice(0, startLine - 1).join('\n');
+    const regionLines = lines.slice(startLine - 1, endLine - 1);
+    const afterRegion = lines.slice(endLine - 1).join('\n');
+    let regionContent = regionLines.join('\n');
+
+    // 保存替换前内容（用于预览）
+    const beforePreview = regionContent.substring(0, 200);
+
+    // 在区域内执行替换
+    let replacements = 0;
+    if (input.isRegex) {
+      const flags = input.replaceAll ? 'g' : '';
+      try {
+        const regex = new RegExp(input.oldText, flags);
+        const matches = regionContent.match(regex);
+        replacements = matches ? matches.length : 0;
+        regionContent = regionContent.replace(regex, input.newText);
+      } catch (error) {
+        return JSON.stringify({
+          success: false,
+          error: `Invalid regex: ${error.message}`
+        });
+      }
+    } else {
+      if (input.replaceAll) {
+        const parts = regionContent.split(input.oldText);
+        replacements = parts.length - 1;
+        regionContent = parts.join(input.newText);
+      } else {
+        if (!regionContent.includes(input.oldText)) {
+          return JSON.stringify({
+            success: false,
+            error: 'Text not found in region',
+            region: { begin: startLine, end: endLine },
+            hint: 'Check if the text exists in the specified line range.'
+          });
+        }
+        replacements = 1;
+        regionContent = regionContent.replace(input.oldText, input.newText);
+      }
+    }
+
+    // 重组文件内容
+    const newContent = [beforeRegion, regionContent, afterRegion].join('\n');
+
+    // 写入文件
+    await fs.writeFile(fullPath, newContent, 'utf-8');
+
+    // 生成预览（替换后）
+    const afterPreview = regionContent.substring(0, 200);
+
+    return JSON.stringify({
+      success: true,
+      filePath: fullPath,
+      region: {
+        begin: startLine,
+        end: endLine,
+        lines: endLine - startLine + 1
+      },
+      replacements,
+      preview: {
+        before: beforePreview + (beforePreview.length >= 200 ? '...' : ''),
+        after: afterPreview + (afterPreview.length >= 200 ? '...' : '')
+      }
+    });
+  }
+});
+
+/**
  * 读取文件末尾工具（用于日志文件）
  */
 export const readFileTailTool = betaZodTool({
@@ -477,6 +608,7 @@ const TOOLS_MAP = {
   readFileTail: readFileTailTool,
   writeFile: writeFileTool,
   editFile: editFileTool,
+  regionConstrainedEdit: regionConstrainedEditTool,
   searchFiles: searchFilesTool,
   searchCode: searchCodeTool,
   listFiles: listFilesTool
@@ -624,7 +756,6 @@ export function generateToolSummary(toolName, input, result) {
       return { summary, detailInfo };
 
     case 'editFile':
-    case 'regionConstrainedEdit':
       const editPath = input.filePath || '';
       const editFileName = editPath.split('/').pop();
       summary = success ? `✏️ ${editFileName}` : `✗ ${editFileName}`;
@@ -635,7 +766,20 @@ export function generateToolSummary(toolName, input, result) {
         detailInfo += ` [${result.replacements} replacement${result.replacements > 1 ? 's' : ''}]`;
       }
 
-      // 区域信息
+      return { summary, detailInfo };
+
+    case 'regionConstrainedEdit':
+      const regionEditPath = input.filePath || '';
+      const regionEditFileName = regionEditPath.split('/').pop();
+      summary = success ? `✏️ ${regionEditFileName}` : `✗ ${regionEditFileName}`;
+
+      // 详细信息：完整路径 + 修改次数 + 区域信息
+      detailInfo = regionEditPath;
+      if (result.replacements !== undefined) {
+        detailInfo += ` [${result.replacements} replacement${result.replacements > 1 ? 's' : ''}]`;
+      }
+
+      // 区域信息（只有 regionConstrainedEdit 才有）
       if (result.region) {
         detailInfo += ` [lines ${result.region.begin}-${result.region.end}]`;
       }

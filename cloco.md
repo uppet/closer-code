@@ -36,6 +36,9 @@ npm start
 # **AI助理的修改后可以不运行，但至少检查一下编译情况**
 # **AI助理的修改代码后不要自动commit，需要用户查阅同意再commit**
 
+# **当出现连续重试3次也无法修正的编译或者变更失败的错误时，停下来，让用户协助决策**
+# **优先考虑用工具regionConstrainedEdit再考虑工具editFile**
+
 ### 关键 API
 
 - `child_process.spawn()` - 启动新进程
