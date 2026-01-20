@@ -67,14 +67,22 @@ export const bashTool = betaZodTool({
 });
 
 /**
- * 读取文件工具
+ * 读取文件工具（智能分段）
  */
 export const readFileTool = betaZodTool({
   name: 'readFile',
-  description: 'Read the contents of a file',
+  description: `Read file contents with smart chunking for large files.
+
+Best practices:
+- For small files (< 10KB): reads entire file
+- For medium files (10-100KB): reads first 100 lines
+- For large files (> 100KB): use readFileLines or readFileChunk
+- For log files: use readFileTail to read from end`,
   inputSchema: z.object({
-    filePath: z.string().describe('Absolute or relative path to the file'),
-    encoding: z.string().optional().describe('File encoding (default: utf-8)')
+    filePath: z.string().describe('File path'),
+    encoding: z.string().optional().describe('Encoding (default: utf-8)'),
+    maxLines: z.number().optional().describe('Max lines to read for large files (default: 100)'),
+    maxSize: z.number().optional().describe('Max size in bytes before truncating (default: 100KB)')
   }),
   run: async (input) => {
     if (!toolExecutorContext) {
@@ -82,12 +90,109 @@ export const readFileTool = betaZodTool({
     }
 
     const fullPath = path.resolve(toolExecutorContext.workingDir, input.filePath);
-    const content = await fs.readFile(fullPath, input.encoding || 'utf-8');
 
+    // 获取文件大小
+    const stats = await fs.stat(fullPath);
+    const maxSize = input.maxSize || 100 * 1024; // 默认 100KB
+
+    // 如果文件过大，只读取前 N 行
+    if (stats.size > maxSize) {
+      const content = await readFileHead(fullPath, input.maxLines || 100);
+      return JSON.stringify({
+        success: true,
+        content,
+        truncated: true,
+        size: stats.size,
+        readBytes: content.length,
+        hint: `File is large (${formatSize(stats.size)}). Use readFileLines/readFileChunk for more control.`
+      });
+    }
+
+    // 小文件：读取全部
+    const content = await fs.readFile(fullPath, input.encoding || 'utf-8');
     return JSON.stringify({
       success: true,
       content,
-      path: fullPath
+      size: stats.size
+    });
+  }
+});
+
+/**
+ * 读取文件头部（前 N 行）
+ */
+async function readFileHead(filePath, maxLines) {
+  const content = await fs.readFile(filePath, 'utf-8');
+  const lines = content.split('\n');
+  const headLines = lines.slice(0, maxLines);
+  return headLines.join('\n');
+}
+
+/**
+ * 读取文件指定行范围工具
+ */
+export const readFileLinesTool = betaZodTool({
+  name: 'readFileLines',
+  description: `Read specific line ranges from a file. Perfect for large files.
+
+Examples:
+- Lines 1-50: {startLine: 1, endLine: 50}
+- Last 100 lines: {startLine: -100}
+- Lines 100-200: {startLine: 100, endLine: 200}`,
+  inputSchema: z.object({
+    filePath: z.string().describe('File path'),
+    startLine: z.number().describe('Start line (1-based, negative for from end)'),
+    endLine: z.number().optional().describe('End line (exclusive)'),
+    maxLines: z.number().optional().describe('Max lines to return (default: 100)')
+  }),
+  run: async (input) => {
+    if (!toolExecutorContext) {
+      throw new Error('Tool executor context not initialized');
+    }
+
+    const fullPath = path.resolve(toolExecutorContext.workingDir, input.filePath);
+    const content = await fs.readFile(fullPath, 'utf-8');
+    const lines = content.split('\n');
+    const totalLines = lines.length;
+
+    // 计算实际行号（处理负数）
+    const startLine = input.startLine < 0
+      ? Math.max(0, totalLines + input.startLine)
+      : input.startLine - 1; // 转换为 0-based
+    const endLine = input.endLine === undefined
+      ? totalLines
+      : (input.endLine < 0 ? Math.max(0, totalLines + input.endLine) : input.endLine - 1);
+
+    // 验证行号
+    if (startLine < 0 || startLine >= totalLines) {
+      return JSON.stringify({
+        success: false,
+        error: `Invalid start line: ${input.startLine}. File has ${totalLines} lines.`
+      });
+    }
+
+    if (endLine < startLine || endLine > totalLines) {
+      return JSON.stringify({
+        success: false,
+        error: `Invalid end line: ${input.endLine}. Must be between ${startLine + 1} and ${totalLines}.`
+      });
+    }
+
+    // 提取指定行（转换为 1-based）
+    const selectedLines = lines.slice(startLine, endLine);
+    const maxLines = input.maxLines || 100;
+    const finalLines = selectedLines.slice(0, maxLines);
+
+    return JSON.stringify({
+      success: true,
+      content: finalLines.join('\n'),
+      lineNumbers: {
+        start: startLine + 1,
+        end: Math.min(startLine + maxLines, endLine) + 1,
+        total: totalLines
+      },
+      truncated: selectedLines.length > maxLines,
+      lineCount: finalLines.length
     });
   }
 });
@@ -202,6 +307,67 @@ export const editFileTool = betaZodTool({
 });
 
 /**
+ * 读取文件末尾工具（用于日志文件）
+ */
+export const readFileTailTool = betaZodTool({
+  name: 'readFileTail',
+  description: `Read from the END of a file. Perfect for log files.
+
+Examples:
+- Last 50 lines: {lines: 50}
+- Last 10KB: {bytes: 10240}`,
+  inputSchema: z.object({
+    filePath: z.string().describe('File path (usually a log file)'),
+    lines: z.number().optional().describe('Number of lines from end (default: 50)'),
+    bytes: z.number().optional().describe('Number of bytes from end')
+  }),
+  run: async (input) => {
+    if (!toolExecutorContext) {
+      throw new Error('Tool executor context not initialized');
+    }
+
+    const fullPath = path.resolve(toolExecutorContext.workingDir, input.filePath);
+    const content = await fs.readFile(fullPath, 'utf-8');
+
+    let result;
+
+    if (input.lines) {
+      // 按行数读取
+      const lines = content.split('\n');
+      const tailLines = lines.slice(-input.lines);
+      result = {
+        text: tailLines.join('\n'),
+        lines: tailLines.length,
+        fromEnd: true
+      };
+    } else if (input.bytes) {
+      // 按字节数读取
+      const tailBytes = content.slice(-input.bytes);
+      result = {
+        text: tailBytes,
+        bytes: tailBytes.length,
+        fromEnd: true
+      };
+    } else {
+      // 默认读取最后 50 行
+      const lines = content.split('\n');
+      const tailLines = lines.slice(-50);
+      result = {
+        text: tailLines.join('\n'),
+        lines: tailLines.length,
+        fromEnd: true
+      };
+    }
+
+    return JSON.stringify({
+      success: true,
+      content: result.text,
+      ...result
+    });
+  }
+});
+
+/**
  * 搜索文件工具
  */
 export const searchFilesTool = betaZodTool({
@@ -307,6 +473,8 @@ export const listFilesTool = betaZodTool({
 const TOOLS_MAP = {
   bash: bashTool,
   readFile: readFileTool,
+  readFileLines: readFileLinesTool,
+  readFileTail: readFileTailTool,
   writeFile: writeFileTool,
   editFile: editFileTool,
   searchFiles: searchFilesTool,
