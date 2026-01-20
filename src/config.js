@@ -73,7 +73,13 @@ const DEFAULT_CONFIG = {
     theme: 'default',
     showLineNumbers: true,
     maxOutputLines: 100,
-    autoScroll: true
+    autoScroll: true,
+    // 流式更新配置（Buffer + Throttle）
+    streamUpdate: {
+      interval: 1000,              // 更新间隔（毫秒），默认1秒
+      bufferSize: 50,              // 缓冲区大小（token数量）
+      updateOnPunctuation: true    // 遇到句子结束标点时立即更新
+    }
   },
 
   // MCP 配置

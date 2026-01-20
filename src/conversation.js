@@ -89,6 +89,15 @@ export class Conversation {
 
     // 初始化工具执行器上下文
     setToolExecutorContext(config);
+
+    // 流式更新节流配置（Buffer + Throttle）
+    this.streamUpdate = {
+      lastUpdateTime: 0,
+      queuedTokens: [],
+      interval: config?.ui?.streamUpdate?.interval || 1000, // 默认1秒
+      bufferSize: config?.ui?.streamUpdate?.bufferSize || 50, // 缓冲区大小
+      updateOnPunctuation: config?.ui?.streamUpdate?.updateOnPunctuation !== false // 默认启用标点更新
+    };
   }
 
   /**
@@ -233,7 +242,11 @@ export class Conversation {
       // 工具调用循环
       let totalInputTokens = 0;
       let totalOutputTokens = 0;
-      
+
+      // 重置流式更新状态
+      this.streamUpdate.lastUpdateTime = 0;
+      this.streamUpdate.queuedTokens = [];
+
       while (true) {
         // 使用流式 API 发送消息
         const response = await aiClient.chatStream(
@@ -262,12 +275,30 @@ export class Conversation {
                 });
               }
             } else if (chunk.type === 'text') {
-              // 真正的流式文本
+              // 流式文本 - 使用 Buffer + Throttle 策略
               if (typeof onProgress === 'function') {
-                onProgress({
-                  type: 'token',
-                  content: chunk.delta
-                });
+                const now = Date.now();
+                const timeSinceLastUpdate = now - this.streamUpdate.lastUpdateTime;
+
+                // 累积 token
+                this.streamUpdate.queuedTokens.push(chunk.delta);
+                const combinedContent = this.streamUpdate.queuedTokens.join('');
+
+                // 检查是否应该更新（满足任一条件）
+                const shouldUpdate =
+                  timeSinceLastUpdate >= this.streamUpdate.interval || // 条件1: 时间间隔（1秒）
+                  this.streamUpdate.queuedTokens.length >= this.streamUpdate.bufferSize || // 条件2: 缓冲区满
+                  (this.streamUpdate.updateOnPunctuation && /[.!?。！？]\s*$/.test(combinedContent)); // 条件3: 句子结束
+
+                if (shouldUpdate) {
+                  onProgress({
+                    type: 'token',
+                    content: combinedContent
+                  });
+
+                  this.streamUpdate.queuedTokens = [];
+                  this.streamUpdate.lastUpdateTime = now;
+                }
               }
             } else if (chunk.type === 'content_block_start') {
               // 检测到工具调用块开始
@@ -294,7 +325,17 @@ export class Conversation {
         const toolUseBlocks = response.content.filter(block => block.type === 'tool_use');
 
         if (toolUseBlocks.length === 0) {
-          // 没有工具调用，提取最终文本内容（用于保存历史）
+          // 没有工具调用，先发送剩余的 tokens
+          if (this.streamUpdate.queuedTokens.length > 0 && typeof onProgress === 'function') {
+            const remainingContent = this.streamUpdate.queuedTokens.join('');
+            onProgress({
+              type: 'token',
+              content: remainingContent
+            });
+            this.streamUpdate.queuedTokens = [];
+          }
+
+          // 提取最终文本内容（用于保存历史）
           fullTextContent = response.content
             .filter(block => block.type === 'text')
             .map(block => block.text)
@@ -481,6 +522,10 @@ export class Conversation {
         content: []
       };
 
+      // 重置流式更新状态
+      this.streamUpdate.lastUpdateTime = 0;
+      this.streamUpdate.queuedTokens = [];
+
       await logAIRequest(this.messages, { system: this.systemPrompt });
 
       await aiClient.chatStream(
@@ -510,17 +555,45 @@ export class Conversation {
               });
             }
           }
-          // 处理文本事件
+          // 处理文本事件 - 使用 Buffer + Throttle 策略
           else if (chunk.type === 'text') {
             if (typeof onProgress === 'function') {
-              onProgress({
-                type: 'token',
-                content: chunk.delta
-              });
+              const now = Date.now();
+              const timeSinceLastUpdate = now - this.streamUpdate.lastUpdateTime;
+
+              // 累积 token
+              this.streamUpdate.queuedTokens.push(chunk.delta);
+              const combinedContent = this.streamUpdate.queuedTokens.join('');
+
+              // 检查是否应该更新（满足任一条件）
+              const shouldUpdate =
+                timeSinceLastUpdate >= this.streamUpdate.interval || // 条件1: 时间间隔（1秒）
+                this.streamUpdate.queuedTokens.length >= this.streamUpdate.bufferSize || // 条件2: 缓冲区满
+                (this.streamUpdate.updateOnPunctuation && /[.!?。！？]\s*$/.test(combinedContent)); // 条件3: 句子结束
+
+              if (shouldUpdate) {
+                onProgress({
+                  type: 'token',
+                  content: combinedContent
+                });
+
+                this.streamUpdate.queuedTokens = [];
+                this.streamUpdate.lastUpdateTime = now;
+              }
             }
           }
         }
       );
+
+      // 发送剩余的 tokens
+      if (this.streamUpdate.queuedTokens.length > 0 && typeof onProgress === 'function') {
+        const remainingContent = this.streamUpdate.queuedTokens.join('');
+        onProgress({
+          type: 'token',
+          content: remainingContent
+        });
+        this.streamUpdate.queuedTokens = [];
+      }
 
       return fullResponse;
     } catch (error) {
