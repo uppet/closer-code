@@ -48,8 +48,45 @@ export class OpenAIClient {
     const tools = options.tools || [];
     const temperature = options.temperature ?? 0.7;
 
-    // 转换消息格式（Anthropic -> OpenAI）
-    const formattedMessages = messages.map(m => this._convertMessageFormat(m));
+    // 转换消息格式（Anthropic -> OpenAI），需要特殊处理 tool_result
+    const formattedMessages = [];
+
+    // 遍历消息并转换
+    for (const message of messages) {
+      const converted = this._convertMessageFormat(message);
+
+      // 检查是否包含 tool_result（需要拆分为多个 role: 'tool' 消息）
+      if (Array.isArray(message.content)) {
+        const toolResultBlocks = message.content.filter(block => block.type === 'tool_result');
+        const textBlocks = message.content.filter(block => block.type === 'text');
+
+        if (toolResultBlocks.length > 0) {
+          // 每个工具结果作为独立的 role: 'tool' 消息
+          for (const block of toolResultBlocks) {
+            formattedMessages.push({
+              role: 'tool',
+              tool_call_id: block.tool_use_id,
+              content: typeof block.content === 'string' ? block.content : JSON.stringify(block.content)
+            });
+          }
+
+          // 如果有文本内容，添加为 user 消息
+          if (textBlocks.length > 0) {
+            const textContent = textBlocks.map(block => block.text).join('\n');
+            formattedMessages.push({
+              role: message.role,
+              content: textContent
+            });
+          }
+        } else {
+          // 没有 tool_result，直接添加转换后的消息
+          formattedMessages.push(converted);
+        }
+      } else {
+        // 不是数组，直接添加
+        formattedMessages.push(converted);
+      }
+    }
 
     // 如果有工具，需要转换为 OpenAI agents 的 tool 格式
     const openaiTools = this._convertTools(tools);
@@ -89,11 +126,47 @@ export class OpenAIClient {
     const tools = options.tools || [];
     const temperature = options.temperature ?? 0.7;
 
-    // 转换消息格式
+    // 转换消息格式，需要特殊处理 tool_result
     const formattedMessages = [
-      { role: 'system', content: system },
-      ...messages.map(m => this._convertMessageFormat(m))
+      { role: 'system', content: system }
     ];
+
+    // 遍历消息并转换
+    for (const message of messages) {
+      const converted = this._convertMessageFormat(message);
+
+      // 检查是否包含 tool_result（需要拆分为多个 role: 'tool' 消息）
+      if (Array.isArray(message.content)) {
+        const toolResultBlocks = message.content.filter(block => block.type === 'tool_result');
+        const textBlocks = message.content.filter(block => block.type === 'text');
+
+        if (toolResultBlocks.length > 0) {
+          // 每个工具结果作为独立的 role: 'tool' 消息
+          for (const block of toolResultBlocks) {
+            formattedMessages.push({
+              role: 'tool',
+              tool_call_id: block.tool_use_id,
+              content: typeof block.content === 'string' ? block.content : JSON.stringify(block.content)
+            });
+          }
+
+          // 如果有文本内容，添加为 user 消息
+          if (textBlocks.length > 0) {
+            const textContent = textBlocks.map(block => block.text).join('\n');
+            formattedMessages.push({
+              role: message.role,
+              content: textContent
+            });
+          }
+        } else {
+          // 没有 tool_result，直接添加转换后的消息
+          formattedMessages.push(converted);
+        }
+      } else {
+        // 不是数组，直接添加
+        formattedMessages.push(converted);
+      }
+    }
 
     // 转换工具格式
     const openaiTools = this._convertTools(tools);
@@ -251,7 +324,7 @@ export class OpenAIClient {
    */
   _convertMessageFormat(message) {
     // Anthropic: { role, content } where content can be string or array
-    // OpenAI: { role, content } or { role, tool_calls } or { role, content: [{tool_call_id, content}] }
+    // OpenAI: { role, content } or { role, tool_calls } or { role: 'tool', tool_call_id, content }
 
     if (typeof message.content === 'string') {
       return {
@@ -293,13 +366,25 @@ export class OpenAIClient {
       const toolResultBlocks = message.content.filter(block => block.type === 'tool_result');
 
       if (toolResultBlocks.length > 0) {
-        // OpenAI 格式：user 消息使用 content 数组，每个包含 tool_call_id
+        // OpenAI 格式：每个 tool_result 应该是一个独立的 role: 'tool' 消息
+        // 但由于这个函数返回单个消息，我们需要特殊处理
+        // 如果只有一个 tool_result，返回标准格式
+        if (toolResultBlocks.length === 1 && !textBlocks.length) {
+          const block = toolResultBlocks[0];
+          return {
+            role: 'tool',
+            tool_call_id: block.tool_use_id,
+            content: typeof block.content === 'string' ? block.content : JSON.stringify(block.content)
+          };
+        }
+
+        // 如果有多个 tool_result 或同时有文本，返回 user 消息格式
+        // 注意：这种情况下，调用方需要将这个消息拆分为多个消息
         return {
           role: message.role,
           content: toolResultBlocks.map(block => ({
-            type: 'tool',
-            tool_call_id: block.tool_use_id,
-            content: block.content
+            type: 'text',
+            text: `[Tool Result for ${block.tool_use_id}]: ${typeof block.content === 'string' ? block.content : JSON.stringify(block.content)}`
           }))
         };
       }
@@ -349,11 +434,20 @@ export class OpenAIClient {
           return `${m.role}: ${m.content}`;
         }
         if (Array.isArray(m.content)) {
-          const text = m.content
-            .filter(block => block.type === 'text')
-            .map(block => block.text)
-            .join('\n');
-          return `${m.role}: ${text}`;
+          // 提取文本内容
+          const textBlocks = m.content.filter(block => block.type === 'text');
+          const text = textBlocks.map(block => block.text).join('\n');
+
+          // 提取工具结果
+          const toolResultBlocks = m.content.filter(block => block.type === 'tool_result');
+          const toolResults = toolResultBlocks.map(block => {
+            const content = typeof block.content === 'string' ? block.content : JSON.stringify(block.content);
+            return `[Tool Result: ${content}]`;
+          }).join('\n');
+
+          // 组合文本和工具结果
+          const combined = [text, toolResults].filter(s => s).join('\n');
+          return `${m.role}: ${combined}`;
         }
         return '';
       })
