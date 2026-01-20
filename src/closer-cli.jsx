@@ -5,12 +5,13 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { render, Box, Text } from 'ink';
-import TextInput from 'ink-text-input';
 import { useInput } from 'ink';
 import { createConversation } from './conversation.js';
 import { getConfig, updateConfig } from './config.js';
 import { createShortcutManager } from './shortcuts.js';
 import { createSnippetManager, SNIPPET_TEMPLATES } from './snippets.js';
+import { createHistoryManager } from './input/history.js';
+import { EnhancedTextInputWithShortcuts } from './input/enhanced-input.jsx';
 import fs from 'fs';
 import path from 'path';
 
@@ -314,6 +315,8 @@ function App() {
   const [abortMessage, setAbortMessage] = useState(null); // 中止任务的提示
   const abortControllerRef = useRef(null);
   const inputRef = useRef(''); // 用于在 useInput 中获取最新的 input 值
+  // 历史记录管理器
+  const [inputHistory] = useState(() => createHistoryManager({ maxSize: 100 }));
 
   // 当消息更新时，重新计算行
   useEffect(() => {
@@ -404,24 +407,41 @@ function App() {
       return;
     }
 
+    // 处理历史记录导航（方向键）
+    // 优先处理历史记录导航，其次才是滚动
+    if (key.upArrow || key.downArrow) {
+      // 尝试导航历史记录
+      const direction = key.upArrow ? 'up' : 'down';
+      const historyResult = inputHistory.navigate(direction, inputRef.current);
+      
+      if (historyResult !== null) {
+        // 历史记录导航成功
+        setInput(historyResult);
+        inputRef.current = historyResult;
+        return; // 阻止事件继续传播
+      }
+      
+      // 没有历史记录或已到边界，尝试滚动
+      // 仅在输入框为空时滚动（避免与光标移动冲突）
+      if (inputRef.current.length === 0) {
+        if (key.upArrow) {
+          setScrollPosition(prev => Math.max(0, prev - 1));
+        } else if (key.downArrow) {
+          const maxPosition = Math.max(0, messageLines.length - conversationHeight);
+          setScrollPosition(prev => Math.min(maxPosition, prev + 1));
+        }
+      }
+    }
+
     // 处理滚动（使用自定义滚动系统）
     // PageUp/PageDown - 始终可用于滚动
-    if (key.pageUp) {
+    else if (key.pageUp) {
       const delta = Math.min(10, conversationHeight);
       setScrollPosition(prev => Math.max(0, prev - delta));
     } else if (key.pageDown) {
       const delta = Math.min(10, conversationHeight);
       const maxPosition = Math.max(0, messageLines.length - conversationHeight);
       setScrollPosition(prev => Math.min(maxPosition, prev + delta));
-    }
-    // 方向键 - 仅在输入框为空时滚动（避免与光标移动冲突）
-    else if (inputRef.current.length === 0) {
-      if (key.upArrow) {
-        setScrollPosition(prev => Math.max(0, prev - 1));
-      } else if (key.downArrow) {
-        const maxPosition = Math.max(0, messageLines.length - conversationHeight);
-        setScrollPosition(prev => Math.min(maxPosition, prev + 1));
-      }
     }
     // Alt 键组合 - 始终可用
     else if (key.alt && key.upArrow) {
@@ -876,8 +896,29 @@ Type your message or command to get started.`
 /plan <task> - Create and execute a task plan
 /learn - Learn project patterns
 /status - Show conversation summary
+/history - Show input history statistics
 /help - Show this help message`
         }]);
+        break;
+
+      case '/history':
+        setActivity('📊 获取历史记录统计...');
+        const historyStats = inputHistory.getStats();
+        const historyInfo = {
+          role: 'system',
+          content: `Input History Statistics:
+• Total entries: ${historyStats.total}
+• Current index: ${historyStats.currentIndex}
+• Search results: ${historyStats.searchResults}
+• History file: ~/.closer-input-history
+
+Tips:
+• Use ↑/↓ arrows to browse history
+• History is automatically saved
+• Duplicate entries are filtered`
+        };
+        setMessages(prev => [...prev, historyInfo]);
+        setActivity(null);
         break;
 
       default:
@@ -1096,7 +1137,7 @@ Type your message or command to get started.`
         <Box marginRight={1}>
           <Text bold color="cyan">❯</Text>
         </Box>
-        <TextInput
+        <EnhancedTextInputWithShortcuts
           value={input}
           onChange={(value) => {
             setInput(value);
@@ -1105,6 +1146,8 @@ Type your message or command to get started.`
           onSubmit={handleSubmit}
           placeholder="Type a message or /help for commands..."
           disabled={isProcessing}
+          history={inputHistory}
+          showHistoryIndicator={true}
         />
       </Box>
     </Box>
