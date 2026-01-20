@@ -33,6 +33,11 @@ export class OpenAIClient {
 
     // 存储当前 agent
     this.currentAgent = null;
+
+    // DeepSeek-R1 Reasoning 支持
+    this.isDeepSeekReasoner = this.model.includes('deepseek-reasoner') ||
+                               config.enableReasoning === true;
+    this.reasoningContent = ''; // 累积的推理内容
   }
 
   /**
@@ -171,15 +176,25 @@ export class OpenAIClient {
     // 转换工具格式
     const openaiTools = this._convertTools(tools);
 
-    // 使用 OpenAI SDK 的原生流式 API
-    const stream = await this.client.chat.completions.create({
+    // 构建 API 请求参数
+    const apiParams = {
       model: this.model,
       messages: formattedMessages,
       tools: openaiTools.length > 0 ? openaiTools : undefined,
       temperature: temperature,
       max_tokens: this.maxTokens,
       stream: true
-    });
+    };
+
+    // DeepSeek-R1 Reasoning: 添加 thinking 参数
+    if (this.isDeepSeekReasoner && options.thinking?.type === 'enabled') {
+      apiParams.extra_body = {
+        thinking: { type: 'enabled' }
+      };
+    }
+
+    // 使用 OpenAI SDK 的原生流式 API
+    const stream = await this.client.chat.completions.create(apiParams);
 
     let fullResponse = {
       role: 'assistant',
@@ -189,6 +204,7 @@ export class OpenAIClient {
 
     let currentToolCalls = [];
     let accumulatedText = '';
+    let accumulatedReasoning = '';
 
     try {
       for await (const chunk of stream) {
@@ -196,6 +212,19 @@ export class OpenAIClient {
           const delta = chunk.choices[0]?.delta;
 
           if (!delta) continue;
+
+          // 处理 DeepSeek-R1 的 reasoning_content
+          if (delta.reasoning_content) {
+            accumulatedReasoning += delta.reasoning_content;
+
+            if (typeof onChunk === 'function') {
+              onChunk({
+                type: 'reasoning',
+                delta: delta.reasoning_content,
+                snapshot: accumulatedReasoning
+              });
+            }
+          }
 
           // 处理文本内容
           if (delta.content) {
@@ -260,6 +289,17 @@ export class OpenAIClient {
     }
 
     // 构建响应内容
+    if (accumulatedReasoning) {
+      // DeepSeek-R1 的 reasoning_content
+      fullResponse.content.push({
+        type: 'reasoning',
+        text: accumulatedReasoning
+      });
+      
+      // 保存推理内容用于后续工具调用
+      this.reasoningContent = accumulatedReasoning;
+    }
+
     if (accumulatedText) {
       fullResponse.content.push({
         type: 'text',
@@ -289,6 +329,13 @@ export class OpenAIClient {
           });
         }
       }
+    }
+
+    // DeepSeek-R1: 保存完整的响应消息（包含 reasoning_content）
+    // 用于下一轮工具调用
+    if (this.isDeepSeekReasoner) {
+      fullResponse.reasoning_content = accumulatedReasoning || '';
+      fullResponse.raw_content = accumulatedText || '';
     }
 
     return fullResponse;
@@ -352,6 +399,55 @@ export class OpenAIClient {
   }
 
   /**
+   * 清除历史消息中的 reasoning_content（DeepSeek-R1 特性）
+   * 
+   * DeepSeek-R1 要求：
+   * - 同一轮的工具调用中：保留 reasoning_content
+   * - 新一轮对话开始时：清除 reasoning_content 以节省带宽
+   * 
+   * @param {Array} messages - 消息数组
+   * @returns {Array} 清除后的消息数组
+   */
+  clearReasoningContent(messages) {
+    if (!this.isDeepSeekReasoner) {
+      return messages; // 非 DeepSeek-R1 模型，无需处理
+    }
+
+    // 清除每条消息中的 reasoning_content
+    return messages.map(message => {
+      if (message.reasoning_content !== undefined) {
+        // 创建新消息对象，不包含 reasoning_content
+        const { reasoning_content, ...messageWithoutReasoning } = message;
+        return messageWithoutReasoning;
+      }
+      return message;
+    });
+  }
+
+  /**
+   * 保留当前轮的 reasoning_content（DeepSeek-R1 特性）
+   * 
+   * 用于在同一轮的工具调用中继续传递 reasoning_content
+   * 
+   * @param {Array} messages - 消息数组
+   * @param {string} reasoningContent - 当前轮的推理内容
+   * @returns {Array} 添加了 reasoning_content 的消息数组
+   */
+  appendCurrentReasoning(messages, reasoningContent) {
+    if (!this.isDeepSeekReasoner || !reasoningContent) {
+      return messages; // 非 DeepSeek-R1 或无推理内容，无需处理
+    }
+
+    // 在最后一条 assistant 消息中添加 reasoning_content
+    const lastMessage = messages[messages.length - 1];
+    if (lastMessage && lastMessage.role === 'assistant') {
+      lastMessage.reasoning_content = reasoningContent;
+    }
+
+    return messages;
+  }
+
+  /**
    * 转换消息格式（Anthropic -> OpenAI）
    * @private
    */
@@ -390,6 +486,11 @@ export class OpenAIClient {
         // 如果有文本内容，添加 content 字段
         if (textBlocks.length > 0) {
           result.content = textBlocks.map(block => block.text).join('\n');
+        }
+
+        // DeepSeek-R1: 保留 reasoning_content 字段
+        if (this.isDeepSeekReasoner && message.reasoning_content !== undefined) {
+          result.reasoning_content = message.reasoning_content;
         }
 
         return result;

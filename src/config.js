@@ -33,7 +33,9 @@ const DEFAULT_CONFIG = {
       apiKey: process.env.CLOSER_OPENAI_API_KEY || '',
       baseURL: process.env.CLOSER_OPENAI_BASE_URL || 'https://api.openai.com/v1',
       model: process.env.CLOSER_OPENAI_MODEL || 'gpt-4o',
-      maxTokens: parseInt(process.env.CLOSER_OPENAI_MAX_TOKENS || '4096')
+      maxTokens: parseInt(process.env.CLOSER_OPENAI_MAX_TOKENS || '4096'),
+      // DeepSeek-R1 Reasoning 支持
+      enableReasoning: process.env.CLOSER_DEEPSEEK_REASONING === 'true'
     },
     ollama: {
       baseURL: process.env.CLOSER_OLLAMA_BASE_URL || 'http://localhost:11434',

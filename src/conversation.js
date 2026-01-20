@@ -249,6 +249,11 @@ export class Conversation {
       this.streamUpdate.lastUpdateTime = 0;
       this.streamUpdate.queuedTokens = [];
 
+      // DeepSeek-R1: 新一轮对话开始时清除历史中的 reasoning_content
+      if (aiClient.clearReasoningContent) {
+        currentMessages = aiClient.clearReasoningContent(currentMessages);
+      }
+
       while (true) {
         // 使用流式 API 发送消息
         const response = await aiClient.chatStream(
@@ -274,6 +279,15 @@ export class Conversation {
                 onProgress({
                   type: 'thinking_signature',
                   signature: chunk.signature
+                });
+              }
+            } else if (chunk.type === 'reasoning') {
+              // DeepSeek-R1 的推理内容
+              if (typeof onProgress === 'function') {
+                onProgress({
+                  type: 'reasoning',
+                  delta: chunk.delta,      // 增量内容
+                  snapshot: chunk.snapshot  // 完整快照
                 });
               }
             } else if (chunk.type === 'text') {
@@ -344,26 +358,37 @@ export class Conversation {
             .join('\n');
 
           // 更新消息历史
-          this.messages.push({
+          const assistantMessage = {
             role: MessageType.ASSISTANT,
             content: response.content
-          });
+          };
+
+          // DeepSeek-R1: 保留 reasoning_content 字段
+          if (response.reasoning_content !== undefined) {
+            assistantMessage.reasoning_content = response.reasoning_content;
+          }
+
+          this.messages.push(assistantMessage);
           break;
         }
 
         hasToolCalls = true;
 
         // 添加助手响应（包含工具调用）到 currentMessages（用于下一轮 AI 请求）
-        currentMessages.push({
+        const assistantMessage = {
           role: MessageType.ASSISTANT,
           content: response.content
-        });
+        };
+
+        // DeepSeek-R1: 保留 reasoning_content 字段
+        if (response.reasoning_content !== undefined) {
+          assistantMessage.reasoning_content = response.reasoning_content;
+        }
+
+        currentMessages.push(assistantMessage);
 
         // 同时添加到 this.messages（用于保存历史）
-        this.messages.push({
-          role: MessageType.ASSISTANT,
-          content: response.content
-        });
+        this.messages.push(assistantMessage);
 
         // 处理工具调用
         for (const block of toolUseBlocks) {
