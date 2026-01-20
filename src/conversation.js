@@ -231,6 +231,9 @@ export class Conversation {
       await logAIRequest(currentMessages, { system: this.systemPrompt, tools: tools.map(t => t.name) });
 
       // 工具调用循环
+      let totalInputTokens = 0;
+      let totalOutputTokens = 0;
+      
       while (true) {
         // 使用流式 API 发送消息
         const response = await aiClient.chatStream(
@@ -280,6 +283,12 @@ export class Conversation {
             }
           }
         );
+
+        // 累加token使用量
+        if (response.usage) {
+          totalInputTokens += response.usage.input_tokens || 0;
+          totalOutputTokens += response.usage.output_tokens || 0;
+        }
 
         // 检查是否有工具调用
         const toolUseBlocks = response.content.filter(block => block.type === 'tool_use');
@@ -425,7 +434,12 @@ export class Conversation {
 
       return {
         content: textContent,
-        toolCalls: hasToolCalls ? ['executed'] : []
+        toolCalls: hasToolCalls ? ['executed'] : [],
+        usage: {
+          input_tokens: totalInputTokens,
+          output_tokens: totalOutputTokens,
+          total_tokens: totalInputTokens + totalOutputTokens
+        }
       };
     } catch (error) {
       await logAIError(error);

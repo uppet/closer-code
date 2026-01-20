@@ -439,12 +439,31 @@ function App() {
     }
   }, { capture: true }); // capture: true 确保能捕获按键
 
+  // Token 统计状态
+  const [tokenStats, setTokenStats] = useState({
+    total: 0,
+    limit: 4096, // 默认token限制
+    input: 0,
+    output: 0,
+    percentage: 0
+  });
+
   // 初始化
   useEffect(() => {
     async function init() {
       try {
         const cfg = getConfig();
         setConfig(cfg);
+
+        // 从配置中获取token限制
+        const provider = cfg.ai?.provider || 'anthropic';
+        const tokenLimit = cfg.ai?.[provider]?.maxTokens || 4096;
+        
+        // 更新token统计状态
+        setTokenStats(prev => ({
+          ...prev,
+          limit: tokenLimit
+        }));
 
         const conv = await createConversation(cfg);
         setConversation(conv);
@@ -478,6 +497,33 @@ Type your message or command to get started.`
   }, []);
 
 
+  // 更新token统计信息
+  const updateTokenStats = useCallback((newInputTokens = 0, newOutputTokens = 0) => {
+    setTokenStats(prev => {
+      const newInput = prev.input + newInputTokens;
+      const newOutput = prev.output + newOutputTokens;
+      const newTotal = newInput + newOutput;
+      const newPercentage = Math.round((newTotal / prev.limit) * 100);
+      
+      return {
+        ...prev,
+        input: newInput,
+        output: newOutput,
+        total: newTotal,
+        percentage: newPercentage
+      };
+    });
+  }, []);
+
+  // 估算用户消息的token数（在没有API计数的情况下使用）
+  const estimateUserTokens = useCallback((text) => {
+    // 简单估算：中文字符和英文字符分别处理
+    const chineseChars = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
+    const englishChars = text.length - chineseChars;
+    // 中文字符约2-3个token，英文字符约0.25个token（按单词计算）
+    return Math.ceil(chineseChars * 2.5 + englishChars * 0.25);
+  }, []);
+
   // 处理用户输入
   const handleSubmit = useCallback(async (value) => {
     if (!conversation || isProcessing) return;
@@ -489,6 +535,10 @@ Type your message or command to get started.`
     // 添加用户消息
     const userMsg = { role: 'user', content: value };
     setMessages(prev => [...prev, userMsg]);
+
+    // 估算用户消息的token数（在没有API计数的情况下使用）
+    const userTokens = estimateUserTokens(value);
+    updateTokenStats(userTokens, 0);
 
     // 处理特殊命令
     if (value.startsWith('/')) {
@@ -674,6 +724,19 @@ Type your message or command to get started.`
       
       abortControllerRef.current = null;
 
+      // 使用API返回的准确token使用信息
+      if (response.usage) {
+        const { input_tokens = 0, output_tokens = 0 } = response.usage;
+        updateTokenStats(input_tokens, output_tokens);
+        
+        // 在thinking中记录准确的token使用
+        setThinking(prev => [...prev, `📊 [${new Date().toLocaleTimeString()}] API Token使用: 输入=${input_tokens}, 输出=${output_tokens}`]);
+      } else {
+        // 如果没有usage信息，使用估算
+        const aiTokens = Math.ceil(response.content.length / 4);
+        updateTokenStats(0, aiTokens);
+      }
+
       // 更新最后的消息为完整响应
       setMessages(prev => {
         const lastIdx = prev.findIndex(m => m.role === 'assistant' && !m.complete);
@@ -685,6 +748,7 @@ Type your message or command to get started.`
               content: response.content,
               complete: true,
               toolCalls: response.toolCalls,
+              usage: response.usage,
               key: Date.now()
             }
           ];
@@ -694,6 +758,7 @@ Type your message or command to get started.`
             content: response.content,
             complete: true,
             toolCalls: response.toolCalls,
+            usage: response.usage,
             key: Date.now()
           }];
         }
@@ -709,7 +774,7 @@ Type your message or command to get started.`
       setIsProcessing(false);
       setActivity(null);
     }
-  }, [conversation, isProcessing]);
+  }, [conversation, isProcessing, updateTokenStats]);
 
   // 处理命令
   const handleCommand = async (cmd) => {
@@ -722,6 +787,14 @@ Type your message or command to get started.`
         setActivity('🗑️ 清除对话历史...');
         setMessages([]);
         conversation.clearHistory();
+        // 重置token统计
+        setTokenStats({
+          total: 0,
+          limit: tokenStats.limit, // 保持原有的限制
+          input: 0,
+          output: 0,
+          percentage: 0
+        });
         setActivity(null);
         break;
 
@@ -815,6 +888,14 @@ Type your message or command to get started.`
     }
   };
 
+  // 根据token使用情况确定颜色
+  const getTokenColor = () => {
+    const percentage = tokenStats.percentage;
+    if (percentage < 70) return 'green';
+    if (percentage < 90) return 'yellow';
+    return 'red';
+  };
+
   if (!config) {
     return (
       <Box padding={1}>
@@ -901,7 +982,10 @@ Type your message or command to get started.`
             height="100%"
           >
             <Box borderBottom={false} borderColor="blue" paddingBottom={0} marginBottom={1}>
-              <Text bold color="blue">💬 Conversation</Text>
+              <Text bold color="blue">
+                💬 Conversation 
+                <Text color={getTokenColor()}> [Tokens: {tokenStats.total.toLocaleString()}/{tokenStats.limit.toLocaleString()}]</Text>
+              </Text>
             </Box>
             <Box flexDirection="column" overflow="hidden" width="100%" height="100%">
               {messageLines.length > 0 ? (
