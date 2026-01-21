@@ -10,15 +10,15 @@ console.log('🧪 测试 DeepSeek-R1 Reasoning 特性\n');
 
 // 创建 DeepSeek-R1 客户端
 const deepseekClient = new OpenAIClient({
-  apiKey: process.env.DEEPSEEK_API_KEY || 'test-key',
-  baseURL: process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
+  apiKey: process.env.CLOSER_OPENAI_API_KEY || 'test-key',
+  baseURL: 'https://api.deepseek.com',
   model: 'deepseek-reasoner',
   enableReasoning: true
 });
 
 // 创建普通 OpenAI 客户端（对比）
 const openaiClient = new OpenAIClient({
-  apiKey: process.env.OPENAI_API_KEY || 'test-key',
+  apiKey: process.env.CLOSER_OPENAI_API_KEY || 'test-key',
   baseURL: 'https://api.openai.com/v1',
   model: 'gpt-4o',
   enableReasoning: false
@@ -46,8 +46,6 @@ console.log('       model: "deepseek-chat",');
 console.log('       enableReasoning: true');
 console.log('     }');
 console.log('');
-console.log('   方式 3: 环境变量');
-console.log('     export CLOSER_DEEPSEEK_REASONING=true\n');
 
 console.log('📝 API 请求示例:');
 console.log('```javascript');

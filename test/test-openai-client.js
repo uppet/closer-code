@@ -2,7 +2,7 @@
  * OpenAI 客户端测试脚本
  *
  * 用法：
- * 1. 设置环境变量: export OPENAI_API_KEY=your_key
+ * 1. 设置环境变量: export CLOSER_OPENAI_API_KEY=your_key
  * 2. 运行测试: node test/test-openai-client.js
  */
 
@@ -10,7 +10,7 @@ import { OpenAIClient } from '../src/ai-client-openai.js';
 
 // 测试配置
 const config = {
-  apiKey: process.env.OPENAI_API_KEY || 'sk-test',
+  apiKey: process.env.CLOSER_OPENAI_API_KEY || 'sk-test',
   baseURL: 'https://api.openai.com/v1',
   model: 'gpt-4o',
   maxTokens: 1000
@@ -112,9 +112,9 @@ async function main() {
   console.log('═'.repeat(50));
 
   // 检查 API key
-  if (!process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY === 'sk-test') {
-    console.warn('\n⚠️  警告: 未设置 OPENAI_API_KEY 环境变量');
-    console.warn('请设置: export OPENAI_API_KEY=your_key');
+  if (!process.env.CLOSER_OPENAI_API_KEY || process.env.CLOSER_OPENAI_API_KEY === 'sk-test') {
+    console.warn('\n⚠️  警告: 未设置 CLOSER_OPENAI_API_KEY 环境变量');
+    console.warn('请设置: export CLOSER_OPENAI_API_KEY=your_key');
     console.warn('继续运行测试（预期会失败）...\n');
   }
 
