@@ -1,3 +1,4 @@
+
 /**
  * 输入历史记录管理器
  * 
@@ -12,7 +13,8 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
-const HISTORY_FILE = path.join(os.homedir(), '.closer-input-history');
+const HISTORY_DIR = path.join(os.homedir(), '.closer-code');
+const HISTORY_FILE = path.join(HISTORY_DIR, 'closer-input-history');
 const MAX_HISTORY_SIZE = 1000;
 const MAX_MEMORY_SIZE = 100; // 内存中保留的最近记录数
 
@@ -55,6 +57,11 @@ export class InputHistory {
    */
   async save() {
     try {
+      // 确保目录存在
+      if (!fs.existsSync(HISTORY_DIR)) {
+        fs.mkdirSync(HISTORY_DIR, { recursive: true });
+      }
+
       // 读取现有历史
       let allHistory = [];
       try {

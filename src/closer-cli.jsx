@@ -13,6 +13,7 @@ import { createShortcutManager } from './shortcuts.js';
 import { createSnippetManager, SNIPPET_TEMPLATES } from './snippets.js';
 import { createHistoryManager } from './input/history.js';
 import { EnhancedTextInputWithShortcuts } from './input/enhanced-input.jsx';
+import FullscreenConversation from './components/fullscreen-conversation.jsx';
 import fs from 'fs';
 import path from 'path';
 
@@ -278,6 +279,7 @@ function App() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [fullscreenMode, setFullscreenMode] = useState(false);
   const [currentPlan, setCurrentPlan] = useState(null);
   const [toolExecutions, setToolExecutions] = useState([]);
   const [status, setStatus] = useState('Initializing...');
@@ -311,11 +313,11 @@ function App() {
   // 自定义滚动管理
   const [messageLines, setMessageLines] = useState([]); // 所有消息行
   const [scrollPosition, setScrollPosition] = useState(0); // 当前滚动位置
-  const conversationHeight = Math.floor(terminalSize.rows * 0.65) - 2; // Conversation区域高度（行数）
+  const conversationHeight = Math.floor(terminalSize.rows * 0.65) - 4; // Conversation区域高度（行数）
 
   // Thinking区域滚动管理
   const [thinkingLines, setThinkingLines] = useState([]); // 所有thinking行
-  const thinkingHeight = 3; // Thinking区域固定显示3行
+  const thinkingHeight = 4; // Thinking区域固定显示4行（增加1行以便更好查看标题）
   
   // Ctrl+C 退出控制
   const [lastCtrlC, setLastCtrlC] = useState(0);
@@ -371,6 +373,12 @@ function App() {
       console.log('\n⏸️  程序已挂起 (按 fg 命令恢复)\n');
       // 发送 SIGTSTP 信号给自己，让操作系统挂起进程
       process.kill(process.pid, 'SIGTSTP');
+      return;
+    }
+
+    // 处理 Ctrl+G - 切换全屏模式
+    if (key.ctrl && input === 'g') {
+      setFullscreenMode(prev => !prev);
       return;
     }
 
@@ -924,7 +932,7 @@ Type your message or command to get started.`
 • Total entries: ${historyStats.total}
 • Current index: ${historyStats.currentIndex}
 • Search results: ${historyStats.searchResults}
-• History file: ~/.closer-input-history
+• History file: ~/.closer-code/closer-input-history
 
 Tips:
 • Use ↑/↓ arrows to browse history
@@ -951,6 +959,16 @@ Tips:
     return 'red';
   };
 
+
+  // 全屏模式：显示完整对话历史
+  if (fullscreenMode) {
+    return (
+      <FullscreenConversation
+        messages={messages}
+        tokenStats={tokenStats}
+      />
+    );
+  }
   if (!config) {
     return (
       <Box padding={1}>
@@ -1072,12 +1090,12 @@ Tips:
 
           {/* 右侧：任务和工具面板 - 占33%宽度 */}
           <Box flexDirection="column" flexGrow={33} width="33%" height="100%">
-            {/* 任务进度 - 占50%高度 */}
+            {/* 任务进度 - 占46%高度（减少4个单位以减少2行高度） */}
             <Box
               borderStyle="round"
               borderColor="yellow"
               flexDirection="column"
-              flexGrow={50}
+              flexGrow={46}
               marginBottom={1}
               width="100%"
             >
@@ -1091,12 +1109,12 @@ Tips:
               )}
             </Box>
 
-            {/* 工具执行 - 占50%高度 */}
+            {/* 工具执行 - 占54%高度（相应增加以保持平衡） */}
             <Box
               borderStyle="round"
               borderColor="green"
               flexDirection="column"
-              flexGrow={50}
+              flexGrow={54}
               width="100%"
             >
               <Box borderBottom={false} borderColor="green" paddingBottom={0} marginBottom={1}>
