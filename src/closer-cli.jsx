@@ -310,6 +310,32 @@ function App() {
     };
   }, []);
 
+  // 监听 SIGCONT (fg 恢复信号)
+  useEffect(() => {
+    const handleContinue = () => {
+      // 恢复 raw mode
+      if (process.stdin.isTTY) {
+        process.stdin.setRawMode(true);
+        process.stdin.resume();
+      }
+
+      // 清屏重绘
+      console.clear();
+
+      // 强制刷新终端尺寸，触发重新渲染
+      setTerminalSize({
+        columns: process.stdout.columns || 80,
+        rows: process.stdout.rows || 30
+      });
+    };
+
+    process.on('SIGCONT', handleContinue);
+
+    return () => {
+      process.off('SIGCONT', handleContinue);
+    };
+  }, []);
+
   // 自定义滚动管理
   const [messageLines, setMessageLines] = useState([]); // 所有消息行
   const [scrollPosition, setScrollPosition] = useState(0); // 当前滚动位置
@@ -371,7 +397,11 @@ function App() {
     // 处理 Ctrl+Z - 挂起程序（发送 SIGTSTP 信号）
     if (key.ctrl && input === 'z') {
       console.log('\n⏸️  程序已挂起 (按 fg 命令恢复)\n');
-      // 发送 SIGTSTP 信号给自己，让操作系统挂起进程
+      // 挂起前先退出 raw mode，让终端回到正常状态
+      if (process.stdin.isTTY) {
+        process.stdin.setRawMode(false);
+      }
+      // 发送 SIGTSTP 信号挂起进程
       process.kill(process.pid, 'SIGTSTP');
       return;
     }

@@ -115,6 +115,7 @@ export function EnhancedTextInput({
     if (key.upArrow ||
         key.downArrow ||
         (key.ctrl && input === 'c') ||
+        (key.ctrl && input === 'z') ||
         key.tab ||
         (key.shift && key.tab)) {
       return;
