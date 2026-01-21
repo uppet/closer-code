@@ -9,6 +9,7 @@
  */
 
 import { Plan, PlanType, PlanStatus, StepStatus } from '../plan.js';
+import { safeJSONParse } from '../utils/json-repair.js';
 
 export class PlanManager {
   constructor(conversation) {
@@ -75,7 +76,9 @@ export class PlanManager {
         // 尝试从响应中提取 JSON
         const jsonMatch = analysis.content.match(/\[[\s\S]*\]/);
         if (jsonMatch) {
-          steps = JSON.parse(jsonMatch[0]);
+          steps = safeJSONParse(jsonMatch[0], {
+          fallback: [{ description: taskDescription }]
+        });
         }
       } catch (error) {
         console.error('Failed to parse steps:', error);

@@ -220,33 +220,39 @@ export class Conversation {
       let textContent = loopResult.fullTextContent;
 
       if (!textContent && lastMessage?.content) {
-        // 提取 thinking 相关内容
-        const thinkingBlocks = lastMessage.content.filter(block =>
-          block.type === 'thinking' || block.type === 'redacted_thinking'
-        );
+        // 检查 content 是否为数组（AI 消息）还是字符串（用户消息）
+        if (Array.isArray(lastMessage.content)) {
+          // 提取 thinking 相关内容
+          const thinkingBlocks = lastMessage.content.filter(block =>
+            block.type === 'thinking' || block.type === 'redacted_thinking'
+          );
 
-        if (thinkingBlocks.length > 0 && typeof onProgress === 'function') {
-          for (const block of thinkingBlocks) {
-            if (block.type === 'thinking') {
-              onProgress({
-                type: 'thinking',
-                content: block.thinking,
-                signature: block.signature
-              });
-            } else if (block.type === 'redacted_thinking') {
-              onProgress({
-                type: 'thinking_redacted',
-                content: block.data
-              });
+          if (thinkingBlocks.length > 0 && typeof onProgress === 'function') {
+            for (const block of thinkingBlocks) {
+              if (block.type === 'thinking') {
+                onProgress({
+                  type: 'thinking',
+                  content: block.thinking,
+                  signature: block.signature
+                });
+              } else if (block.type === 'redacted_thinking') {
+                onProgress({
+                  type: 'thinking_redacted',
+                  content: block.data
+                });
+              }
             }
           }
-        }
 
-        // 提取文本内容
-        textContent = lastMessage.content
-          .filter(block => block.type === 'text')
-          .map(block => block.text)
-          .join('\n') || '';
+          // 提取文本内容
+          textContent = lastMessage.content
+            .filter(block => block.type === 'text')
+            .map(block => block.text)
+            .join('\n') || '';
+        } else {
+          // content 是字符串（用户消息），直接使用
+          textContent = lastMessage.content;
+        }
       }
 
       // 记录 AI 响应

@@ -1,3 +1,5 @@
+import { safeJSONParse } from './utils/json-repair.js';
+
 // OpenAI 客户端
 export class OpenAIClient {
   constructor(config) {
@@ -75,11 +77,14 @@ export class OpenAIClient {
 
     if (choice.message.tool_calls) {
       for (const toolCall of choice.message.tool_calls) {
+        const input = safeJSONParse(toolCall.function.arguments, {
+          fallback: {}
+        });
         message.content.push({
           type: 'tool_use',
           id: toolCall.id,
           name: toolCall.function.name,
-          input: JSON.parse(toolCall.function.arguments)
+          input
         });
       }
     }

@@ -1,7 +1,9 @@
+
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
+import { safeJSONParse } from './utils/json-repair.js';
 
 const CONFIG_DIR = path.join(os.homedir(), '.closer-code');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
@@ -159,7 +161,10 @@ export function loadProjectConfig(projectPath = null) {
   }
 
   try {
-    const projectConfig = JSON.parse(fs.readFileSync(projectConfigPath, 'utf-8'));
+    const configContent = fs.readFileSync(projectConfigPath, 'utf-8');
+    const projectConfig = safeJSONParse(configContent, {
+      fallback: {}
+    });
     const workingDir = projectPath || process.cwd();
     console.log(`[Config] Loaded project config from: ${projectConfigPath}`);
     console.log(`[Config] Project path: ${workingDir}`);
@@ -190,7 +195,10 @@ export function loadConfig(projectPath = null) {
     // 加载全局配置
     let globalConfig = {};
     if (fs.existsSync(CONFIG_FILE)) {
-      globalConfig = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
+      const configContent = fs.readFileSync(CONFIG_FILE, 'utf-8');
+      globalConfig = safeJSONParse(configContent, {
+        fallback: {}
+      });
     }
 
     // 加载项目本地配置
@@ -283,7 +291,10 @@ export function loadHistory(projectPath = null) {
     const historyFile = getProjectHistoryPath(workingDir);
 
     if (fs.existsSync(historyFile)) {
-      const history = JSON.parse(fs.readFileSync(historyFile, 'utf-8'));
+      const historyContent = fs.readFileSync(historyFile, 'utf-8');
+      const history = safeJSONParse(historyContent, {
+        fallback: []
+      });
       console.log(`[History] Loaded ${history.length} messages for project: ${workingDir}`);
       return history;
     } else {
@@ -372,7 +383,10 @@ export function listHistory() {
     const projects = files.map(file => {
       const metaPath = path.join(HISTORY_DIR, file);
       try {
-        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+        const metaContent = fs.readFileSync(metaPath, 'utf-8');
+        const meta = safeJSONParse(metaContent, {
+          fallback: null
+        });
         return {
           projectPath: meta.projectPath,
           messageCount: meta.messageCount,
@@ -402,7 +416,10 @@ export function migrateHistory() {
 
     console.log('[Migration] Starting history migration...');
 
-    const oldHistory = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf-8'));
+    const oldHistoryContent = fs.readFileSync(HISTORY_FILE, 'utf-8');
+    const oldHistory = safeJSONParse(oldHistoryContent, {
+      fallback: []
+    });
     console.log(`[Migration] Found ${oldHistory.length} messages in old history file.`);
 
     // 备份旧文件
@@ -426,7 +443,10 @@ export function migrateHistory() {
 export function loadMemory() {
   try {
     if (fs.existsSync(MEMORY_FILE)) {
-      return JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf-8'));
+      const memoryContent = fs.readFileSync(MEMORY_FILE, 'utf-8');
+      return safeJSONParse(memoryContent, {
+        fallback: {}
+      });
     }
   } catch (error) {
     console.warn('Failed to load memory:', error.message);

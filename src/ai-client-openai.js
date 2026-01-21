@@ -1,3 +1,4 @@
+
 /**
  * OpenAI AI 客户端模块 - 使用 @openai/agents
  *
@@ -14,6 +15,7 @@
 import { Agent, run, tool } from '@openai/agents';
 import { z } from 'zod';
 import OpenAI from 'openai';
+import { safeJSONParse } from './utils/json-repair.js';
 
 /**
  * OpenAI 客户端（使用 @openai/agents SDK）
@@ -309,25 +311,32 @@ export class OpenAIClient {
 
     if (currentToolCalls.length > 0) {
       for (const toolCall of currentToolCalls) {
-        try {
-          fullResponse.content.push({
-            type: 'tool_use',
-            id: toolCall.id,
-            name: toolCall.function.name,
-            input: JSON.parse(toolCall.function.arguments)
-          });
-        } catch (parseError) {
-          console.error('[OpenAI Tool Parse Error]:', parseError.message);
-          console.error('[OpenAI Tool Arguments]:', toolCall.function.arguments);
-          // 返回空对象作为降级处理
-          fullResponse.content.push({
-            type: 'tool_use',
-            id: toolCall.id,
-            name: toolCall.function.name,
-            input: {},
-            parseError: true
-          });
-        }
+        // 使用 jsonrepair 解析工具参数
+        const input = safeJSONParse(toolCall.function.arguments, {
+          fallback: {},
+          silent: false
+        });
+
+        // 检查是否解析失败
+        // 情况1: 返回的不是对象（如字符串、数字等）
+        const isNotObject = typeof input !== 'object' || input === null;
+        // 情况2: 返回的是空对象
+        const isEmptyObject = typeof input === 'object' && input !== null && Object.keys(input).length === 0;
+        // 原始参数是否为空
+        const isArgsEmpty = toolCall.function.arguments.trim() === '' || 
+                           toolCall.function.arguments.trim() === '{}';
+        
+        // 如果返回的不是对象，且原始参数不为空，则认为解析失败
+        // 如果返回的是空对象，且原始参数不是空JSON，则认为解析失败
+        const parseError = (isNotObject && !isArgsEmpty) || (isEmptyObject && !isArgsEmpty);
+
+        fullResponse.content.push({
+          type: 'tool_use',
+          id: toolCall.id,
+          name: toolCall.function.name,
+          input,
+          parseError
+        });
       }
     }
 
@@ -626,17 +635,22 @@ export function createOpenAITool(anthropicTool) {
         // 调用原始工具的 run 方法
         const result = await anthropicTool.run(input);
 
-        // 尝试解析 JSON
-        try {
-          return JSON.parse(result);
-        } catch (parseError) {
-          // 如果解析失败，检查结果是否已经是对象
+        // 使用 jsonrepair 解析 JSON
+        const parsed = safeJSONParse(result, {
+          fallback: null,
+          silent: true
+        });
+
+        // 如果解析失败，检查结果是否已经是对象
+        if (parsed === null) {
           if (typeof result === 'object') {
             return result;
           }
           // 返回原始字符串
           return { result: result };
         }
+
+        return parsed;
       } catch (error) {
         // 工具执行失败，返回错误信息
         console.error(`[OpenAI Tool Execution Error] ${anthropicTool.name}:`, error.message);

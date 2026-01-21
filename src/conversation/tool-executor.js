@@ -10,6 +10,7 @@
 
 import { MessageType } from './core.js';
 import { logToolCall } from '../logger.js';
+import { safeJSONParse } from '../utils/json-repair.js';
 
 export class ToolExecutor {
   constructor(conversation, planManager) {
@@ -161,26 +162,21 @@ export class ToolExecutor {
 
       // 通知工具完成
       if (typeof onProgress === 'function') {
-        try {
-          const parsedResult = JSON.parse(result);
-          onProgress({
-            type: 'tool_complete',
-            tool: block.name,
-            result: parsedResult,
-            success: !parsedResult.error
-          });
-        } catch (parseError) {
-          onProgress({
-            type: 'tool_complete',
-            tool: block.name,
-            result: result,
-            success: false
-          });
-        }
+        const parsedResult = safeJSONParse(result, {
+          fallback: { result }
+        });
+        onProgress({
+          type: 'tool_complete',
+          tool: block.name,
+          result: parsedResult,
+          success: !parsedResult.error
+        });
       }
 
       // 添加工具结果到消息
-      const parsedResult = JSON.parse(result);
+      const parsedResult = safeJSONParse(result, {
+        fallback: { result }
+      });
       const toolResultMessage = {
         role: 'user',
         content: [{
@@ -210,6 +206,18 @@ export class ToolExecutor {
       return JSON.stringify({
         success: false,
         error: `Tool ${block.name} not found`,
+        content: null
+      });
+    }
+
+    // 检查参数解析错误
+    if (block.parseError) {
+      console.warn(`[Tool Executor] Tool ${block.name} has parse error, skipping execution`);
+      return JSON.stringify({
+        success: false,
+        error: `Failed to parse tool arguments for ${block.name}`,
+        parseError: true,
+        originalInput: block.input,
         content: null
       });
     }
