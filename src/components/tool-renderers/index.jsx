@@ -44,24 +44,42 @@ const TOOL_RENDERER_MAP = {
 /**
  * 默认渲染器（用于未知工具）
  */
-function DefaultRenderer({ tool, maxHeight = 10 }) {
+function DefaultRenderer({ tool, maxHeight = 10, renderMode = 'split' }) {
+  if ( tool === 'executed' ) { // fix by joyer handle coded
+    return (
+      <Box>
+      </Box>
+    );
+  }
+
   const { input, result, status, duration } = tool;
-  
+
+  // 全屏模式：简化显示，不显示详细UI
+  if (renderMode === 'fullscreen') {
+    return (
+      <Box>
+        <Text dim>[{tool.tool}]</Text>
+      </Box>
+    );
+  }
+
+
+  // 分屏模式：完整显示
   const statusConfig = {
-    pending: { icon: '⏳', color: 'gray', label: '等待' },
+    pending: { icon: '⏳', color: 'gray', label: 'x等待x' },
     running: { icon: '⚡', color: 'yellow', label: '执行中' },
     success: { icon: '✓', color: 'green', label: '成功' },
     error: { icon: '✗', color: 'red', label: '失败' }
   };
-  
+
   const { icon, color, label } = statusConfig[status] || statusConfig.pending;
-  
+
   return (
     <Box flexDirection="column">
       {/* 工具信息 */}
       <Box>
         <Text color={color}>{icon} </Text>
-        <Text bold>{tool.tool}</Text>
+          <Text bold>tool name:{tool.tool}</Text>
         <Text dim> | </Text>
         <Text color={color}>{label}</Text>
         {duration && <Text dim> | {duration}ms</Text>}
@@ -127,14 +145,15 @@ export function getToolRenderer(toolName) {
 
 /**
  * 工具渲染器包装组件
- * 
+ *
  * 自动根据工具名称选择对应的渲染器
- * 
+ *
  * @param {Object} props
  * @param {Object} props.tool - 工具执行数据
  * @param {number} props.maxHeight - 最大高度
+ * @param {string} props.renderMode - 渲染模式 ('split' | 'fullscreen')
  */
-export function ToolRenderer({ tool, maxHeight = 10 }) {
+export function ToolRenderer({ tool, maxHeight = 10, renderMode = 'split' }) {
   if (!tool) {
     return (
       <Box justifyContent="center" alignItems="center">
@@ -142,10 +161,10 @@ export function ToolRenderer({ tool, maxHeight = 10 }) {
       </Box>
     );
   }
-  
+
   const Renderer = getToolRenderer(tool.tool);
-  
-  return <Renderer tool={tool} maxHeight={maxHeight} />;
+
+  return <Renderer tool={tool} maxHeight={maxHeight} renderMode={renderMode} />;
 }
 
 // 导出所有渲染器
