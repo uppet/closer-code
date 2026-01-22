@@ -1,6 +1,6 @@
 /**
  * Enhanced TextInput Component
- * 
+ *
  * Forked from ink-text-input with the following enhancements:
  * - Added cursorPosition prop for external cursor control
  * - Added onCursorChange callback to notify cursor position changes
@@ -16,6 +16,7 @@
 import React, { useState, useEffect } from 'react';
 import { Text, useInput } from 'ink';
 import chalk from 'chalk';
+import { supportsJobControl } from '../../utils/platform.js';
 
 export function EnhancedTextInput({
   value: originalValue = '',
@@ -115,7 +116,7 @@ export function EnhancedTextInput({
     if (key.upArrow ||
         key.downArrow ||
         (key.ctrl && input === 'c') ||
-        (key.ctrl && input === 'z') ||
+        (supportsJobControl() && key.ctrl && input === 'z') ||
         key.tab ||
         (key.shift && key.tab)) {
       return;

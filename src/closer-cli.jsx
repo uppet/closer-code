@@ -14,6 +14,7 @@ import { createSnippetManager, SNIPPET_TEMPLATES } from './snippets.js';
 import { createHistoryManager } from './input/history.js';
 import { EnhancedTextInputWithShortcuts } from './input/enhanced-input.jsx';
 import FullscreenConversation from './components/fullscreen-conversation.jsx';
+import { safeSuspend, getPlatformName } from './utils/platform.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -396,13 +397,16 @@ function App() {
   useInput((input, key) => {
     // 处理 Ctrl+Z - 挂起程序（发送 SIGTSTP 信号）
     if (key.ctrl && input === 'z') {
-      console.log('\n⏸️  程序已挂起 (按 fg 命令恢复)\n');
-      // 挂起前先退出 raw mode，让终端回到正常状态
-      if (process.stdin.isTTY) {
-        process.stdin.setRawMode(false);
+      // 使用安全的挂起函数
+      const success = safeSuspend();
+
+      if (!success) {
+        // 挂起失败或不支持，显示提示
+        console.log(`\n⚠️  ${getPlatformName()} 不支持 Ctrl+Z 挂起\n`);
+        console.log('替代方案：');
+        console.log('  - 使用 Ctrl+C 退出程序');
+        console.log('  - 或使用 Ctrl+G 切换全屏模式\n');
       }
-      // 发送 SIGTSTP 信号挂起进程
-      process.kill(process.pid, 'SIGTSTP');
       return;
     }
 
