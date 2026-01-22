@@ -14,6 +14,7 @@ import { createSnippetManager, SNIPPET_TEMPLATES } from './snippets.js';
 import { createHistoryManager } from './input/history.js';
 import { EnhancedTextInputWithShortcuts } from './input/enhanced-input.jsx';
 import FullscreenConversation from './components/fullscreen-conversation.jsx';
+import { ToolDetailPanel } from './components/tool-detail-view.jsx';
 import { safeSuspend, getPlatformName } from './utils/platform.js';
 import fs from 'fs';
 import path from 'path';
@@ -289,6 +290,8 @@ function App() {
   const [thinking, setThinking] = useState([]); // AI 思考过程
   const [thinkingEnabled, setThinkingEnabled] = useState(true); // Thinking 开关状态
   const [thinkingScrollPosition, setThinkingScrollPosition] = useState(0); // Thinking滚动位置
+  const [showToolDetail, setShowToolDetail] = useState(false); // 工具详情面板开关
+  const [toolDetailIndex, setToolDetailIndex] = useState(0); // 工具详情面板选中索引
 
   // 终端尺寸状态
   const [terminalSize, setTerminalSize] = useState({
@@ -416,6 +419,17 @@ function App() {
       return;
     }
 
+    // 处理 Ctrl+T - 切换工具详情面板
+    if (key.ctrl && input === 't') {
+      setShowToolDetail(prev => {
+        const newValue = !prev;
+        setActivity(newValue ? '📋 工具详情面板已打开' : '📋 工具详情面板已关闭');
+        setTimeout(() => setActivity(null), 1500);
+        return newValue;
+      });
+      return;
+    }
+
     // 处理 Ctrl+C 和 ESC（始终有效，即使在输入模式）
     if ((key.ctrl && input === 'c') || key.escape) {
       const now = Date.now();
@@ -495,12 +509,20 @@ function App() {
       const maxPosition = Math.max(0, messageLines.length - conversationHeight);
       setScrollPosition(prev => Math.min(maxPosition, prev + 1));
     }
-    // Shift + 方向键 - 滚动Thinking区域
+    // Shift + 方向键 - 工具详情面板打开时切换工具，否则滚动Thinking区域
     else if (key.shift && key.upArrow) {
-      setThinkingScrollPosition(prev => Math.max(0, prev - 1));
+      if (showToolDetail && toolExecutions.length > 0) {
+        setToolDetailIndex(prev => Math.max(0, prev - 1));
+      } else {
+        setThinkingScrollPosition(prev => Math.max(0, prev - 1));
+      }
     } else if (key.shift && key.downArrow) {
-      const maxPosition = Math.max(0, thinkingLines.length - thinkingHeight);
-      setThinkingScrollPosition(prev => Math.min(maxPosition, prev + 1));
+      if (showToolDetail && toolExecutions.length > 0) {
+        setToolDetailIndex(prev => Math.min(toolExecutions.length - 1, prev + 1));
+      } else {
+        const maxPosition = Math.max(0, thinkingLines.length - thinkingHeight);
+        setThinkingScrollPosition(prev => Math.min(maxPosition, prev + 1));
+      }
     }
   }, { capture: true }); // capture: true 确保能捕获按键
 
@@ -757,13 +779,20 @@ Type your message or command to get started.`
             // 存储工具信息，包括 input 和 result 引用（用于生成摘要）
             setToolExecutions(prev => {
               const newExecs = [...prev, {
+                id: Date.now(),
                 tool: progress.tool,
                 timestamp: new Date().toLocaleTimeString(),
                 input: progress.input,
-                result: null
+                result: null,
+                status: 'running',
+                startTime: Date.now(),
+                duration: null
               }];
               // 只保留最近 10 个
-              return newExecs.slice(-10);
+              const sliced = newExecs.slice(-10);
+              // 自动将索引指向最新的工具
+              setToolDetailIndex(sliced.length - 1);
+              return sliced;
             });
           } else if (progress.type === 'tool_complete') {
             const resultMsg = progress.result.success ? '✓ 成功' : '✗ 失败';
@@ -773,7 +802,10 @@ Type your message or command to get started.`
             setToolExecutions(prev => {
               if (prev.length === 0) return prev;
               const newExecs = [...prev];
-              const lastExec = newExecs[newExecs.length - 1];
+              // 找到最后一个 running 状态的工具
+              const lastRunningIdx = newExecs.findLastIndex(e => e.status === 'running');
+              if (lastRunningIdx === -1) return prev;
+              const lastExec = newExecs[lastRunningIdx];
 
               // 使用 generateToolSummary 生成双行显示
               const { summary, detailInfo } = generateToolSummary(
@@ -782,9 +814,11 @@ Type your message or command to get started.`
                 progress.result
               );
 
-              newExecs[newExecs.length - 1] = {
+              newExecs[lastRunningIdx] = {
                 ...lastExec,
                 result: progress.result,
+                status: progress.result.success ? 'success' : 'error',
+                duration: Date.now() - lastExec.startTime,
                 summary,
                 detailInfo
               };
@@ -994,12 +1028,13 @@ Tips:
   };
 
 
-  // 全屏模式：显示完整对话历史
+  // 全屏模式：显示完整对话历史（包含工具详情）
   if (fullscreenMode) {
     return (
       <FullscreenConversation
         messages={messages}
         tokenStats={tokenStats}
+        toolExecutions={toolExecutions}
       />
     );
   }
@@ -1075,8 +1110,8 @@ Tips:
         </Box>
       </Box>
 
-      {/* 主内容区域 - 占剩余65% */}
-      <Box flexGrow={65} flexDirection="row">
+      {/* 主内容区域 - 工具详情面板打开时占50%，否则占65% */}
+      <Box flexGrow={showToolDetail ? 40 : 65} flexDirection="row">
         <Box width="100%">
           {/* 左侧：对话面板 - 占67%宽度 */}
           <Box
@@ -1191,6 +1226,17 @@ Tips:
         >
           <Text bold color="red">⚠️ 再次按 Ctrl+C 或 ESC 退出程序 (1.5秒内)</Text>
         </Box>
+      )}
+
+      {/* 工具详情面板 - 当打开时占用较大空间 */}
+      {showToolDetail && (
+        <ToolDetailPanel
+          tools={toolExecutions}
+          visible={showToolDetail}
+          onClose={() => setShowToolDetail(false)}
+          height={Math.floor(terminalSize.rows * 0.45)}
+          selectedIndex={toolDetailIndex}
+        />
       )}
 
       {/* 输入区域 */}

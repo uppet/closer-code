@@ -112,11 +112,13 @@ export function EnhancedTextInput({
   }
 
   useInput((input, key) => {
-    // 不处理的按键
+    // 不处理的按键（由主组件处理）
     if (key.upArrow ||
         key.downArrow ||
         (key.ctrl && input === 'c') ||
-        (supportsJobControl() && key.ctrl && input === 'z') ||
+        (key.ctrl && input === 'z') ||
+        (key.ctrl && input === 't') ||
+        (key.ctrl && input === 'g') ||
         key.tab ||
         (key.shift && key.tab)) {
       return;
