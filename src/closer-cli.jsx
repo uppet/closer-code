@@ -16,6 +16,7 @@ import { EnhancedTextInputWithShortcuts } from './input/enhanced-input.jsx';
 import FullscreenConversation from './components/fullscreen-conversation.jsx';
 import { ToolDetailPanel } from './components/tool-detail-view.jsx';
 import { safeSuspend, getPlatformName } from './utils/platform.js';
+import { useSmartThrottledState } from './hooks/use-throttled-state.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -292,6 +293,33 @@ function App() {
   const [thinkingScrollPosition, setThinkingScrollPosition] = useState(0); // Thinking滚动位置
   const [showToolDetail, setShowToolDetail] = useState(false); // 工具详情面板开关
   const [toolDetailIndex, setToolDetailIndex] = useState(0); // 工具详情面板选中索引
+
+  // 节流更新 Hook
+  const activityUpdate = useSmartThrottledState(setActivity, {
+    throttleDelay: 1500,
+    immediateTypes: ['error', 'abort']
+  });
+
+  const thinkingUpdate = useSmartThrottledState(setThinking, {
+    throttleDelay: 1500,
+    immediateTypes: ['tool_start', 'tool_complete', 'thinking_signature', 
+                    'thinking_redacted', 'abort']
+  });
+
+  const messagesUpdate = useSmartThrottledState(setMessages, {
+    throttleDelay: 1500,
+    immediateTypes: ['user', 'error', 'system']
+  });
+
+  const toolExecutionsUpdate = useSmartThrottledState(setToolExecutions, {
+    throttleDelay: 1500,
+    immediateTypes: ['complete', 'error']
+  });
+
+  const planUpdate = useSmartThrottledState(setCurrentPlan, {
+    throttleDelay: 1500,
+    immediateTypes: ['completed', 'failed']
+  });
 
   // 终端尺寸状态
   const [terminalSize, setTerminalSize] = useState({
@@ -688,9 +716,9 @@ Type your message or command to get started.`
         (progress) => {
           // 处理流式响应（使用 SDK 事件监听器 API）
           if (progress.type === 'thinking') {
-            // AI thinking 内容 - 逐字显示
-            setActivity('🤔 AI 正在深度思考...');
-            setThinking(prev => {
+            // AI thinking 内容 - 逐字显示（使用节流更新）
+            activityUpdate.updateImmediate('🤔 AI 正在深度思考...');
+            thinkingUpdate.updateSmart(prev => {
               const newThinking = [...prev];
 
               // 检查最后一条是否是当前 thinking（未完成的）
@@ -709,10 +737,10 @@ Type your message or command to get started.`
               }
 
               return newThinking.slice(-30); // 保留最后 30 条thinking记录
-            });
+            }, 'thinking');
           } else if (progress.type === 'thinking_signature') {
-            // Thinking 签名
-            setThinking(prev => {
+            // Thinking 签名（立即更新）
+            thinkingUpdate.updateSmart(prev => {
               const newThinking = [...prev];
               // 计算累计的thinking内容长度
               const totalThinkingLength = prev
@@ -725,19 +753,19 @@ Type your message or command to get started.`
               
               newThinking.push(`✅ [${new Date().toLocaleTimeString()}] Thinking 完成 (${totalThinkingLength} 字符, ~${Math.ceil(totalThinkingLength/4)} tokens)`);
               return newThinking.slice(-30);
-            });
+            }, 'thinking_signature');
           } else if (progress.type === 'thinking_redacted') {
-            // Redacted thinking（被编辑的思考内容）
-            setThinking(prev => {
+            // Redacted thinking（立即更新）
+            thinkingUpdate.updateSmart(prev => {
               const newThinking = [...prev];
               newThinking.push(`🔒 [${new Date().toLocaleTimeString()}] Redacted thinking: ${progress.content}`);
               return newThinking.slice(-10);
-            });
+            }, 'thinking_redacted');
           } else if (progress.type === 'token') {
-            // 真正的流式文本
-            setActivity('✍️ AI 正在输入...');
-            setThinking(prev => [...prev, `✍️ [${new Date().toLocaleTimeString()}] 生成响应中...`]);
-            setMessages(prev => {
+            // 真正的流式文本（使用节流更新）
+            activityUpdate.updateImmediate('✍️ AI 正在输入...');
+            thinkingUpdate.updateThrottled(prev => [...prev, `✍️ [${new Date().toLocaleTimeString()}] 生成响应中...`]);
+            messagesUpdate.updateSmart(prev => {
               const lastMsg = prev[prev.length - 1];
 
               if (lastMsg && lastMsg.role === 'assistant' && !lastMsg.complete) {
@@ -763,21 +791,21 @@ Type your message or command to get started.`
           } else if (progress.type === 'tool_use_start') {
             // 检测到工具调用
             const thinkingMsg = `⚡ [${new Date().toLocaleTimeString()}] 检测到工具调用: ${progress.toolName}`;
-            setActivity(`⚡ 准备执行工具: ${progress.toolName}...`);
-            setThinking(prev => [...prev, thinkingMsg]);
+            activityUpdate.updateImmediate(`⚡ 准备执行工具: ${progress.toolName}...`);
+            thinkingUpdate.updateSmart(prev => [...prev, thinkingMsg], 'tool_start');
           } else if (progress.type === 'plan_created') {
             // AI Planning 被创建
-            setCurrentPlan(progress.plan);
-            setThinking(prev => [...prev, `📋 [${new Date().toLocaleTimeString()}] AI Planning 已创建`]);
+            planUpdate.updateImmediate(progress.plan);
+            thinkingUpdate.updateThrottled(prev => [...prev, `📋 [${new Date().toLocaleTimeString()}] AI Planning 已创建`]);
           } else if (progress.type === 'plan_progress') {
-            // AI Planning 进度更新
-            setCurrentPlan(progress.plan);
+            // AI Planning 进度更新（节流更新）
+            planUpdate.updateThrottled(progress.plan);
           } else if (progress.type === 'tool_start') {
             const thinkingMsg = `⚡ [${new Date().toLocaleTimeString()}] 调用工具: ${progress.tool}`;
-            setActivity(`⚡ 执行工具: ${progress.tool}...`);
-            setThinking(prev => [...prev, thinkingMsg]);
+            activityUpdate.updateImmediate(`⚡ 执行工具: ${progress.tool}...`);
+            thinkingUpdate.updateSmart(prev => [...prev, thinkingMsg], 'tool_start');
             // 存储工具信息，包括 input 和 result 引用（用于生成摘要）
-            setToolExecutions(prev => {
+            toolExecutionsUpdate.updateSmart(prev => {
               const newExecs = [...prev, {
                 id: Date.now(),
                 tool: progress.tool,
@@ -793,13 +821,13 @@ Type your message or command to get started.`
               // 自动将索引指向最新的工具
               setToolDetailIndex(sliced.length - 1);
               return sliced;
-            });
+            }, 'tool_start');
           } else if (progress.type === 'tool_complete') {
             const resultMsg = progress.result.success ? '✓ 成功' : '✗ 失败';
-            setActivity('📊 处理工具结果...');
-            setThinking(prev => [...prev, `📊 [${new Date().toLocaleTimeString()}] 工具执行结果: ${resultMsg}`]);
+            activityUpdate.updateImmediate('📊 处理工具结果...');
+            thinkingUpdate.updateSmart(prev => [...prev, `📊 [${new Date().toLocaleTimeString()}] 工具执行结果: ${resultMsg}`], 'tool_complete');
             // 更新工具执行结果，并生成摘要
-            setToolExecutions(prev => {
+            toolExecutionsUpdate.updateSmart(prev => {
               if (prev.length === 0) return prev;
               const newExecs = [...prev];
               // 找到最后一个 running 状态的工具
@@ -830,7 +858,7 @@ Type your message or command to get started.`
 
       // 检查是否是 abort 结果
       if (response.aborted) {
-        setThinking(prev => [...prev, `❌ [${new Date().toLocaleTimeString()}] 对话已中止: ${response.abortReason}`]);
+        thinkingUpdate.updateSmart(prev => [...prev, `❌ [${new Date().toLocaleTimeString()}] 对话已中止: ${response.abortReason}`], 'abort');
         return;
       }
 
@@ -840,7 +868,7 @@ Type your message or command to get started.`
         updateTokenStats(input_tokens, output_tokens);
 
         // 在thinking中记录准确的token使用
-        setThinking(prev => [...prev, `📊 [${new Date().toLocaleTimeString()}] API Token使用: 输入=${input_tokens}, 输出=${output_tokens}`]);
+        thinkingUpdate.updateSmart(prev => [...prev, `📊 [${new Date().toLocaleTimeString()}] API Token使用: 输入=${input_tokens}, 输出=${output_tokens}`], 'thinking');
       } else {
         // 如果没有usage信息，使用估算
         const aiTokens = Math.ceil(response.content.length / 4);
@@ -848,7 +876,7 @@ Type your message or command to get started.`
       }
 
       // 更新最后的消息为完整响应
-      setMessages(prev => {
+      messagesUpdate.updateSmart(prev => {
         const lastIdx = prev.findIndex(m => m.role === 'assistant' && !m.complete);
         if (lastIdx >= 0) {
           return [
@@ -875,14 +903,14 @@ Type your message or command to get started.`
       });
 
     } catch (error) {
-      setMessages(prev => [...prev, {
+      messagesUpdate.updateSmart(prev => [...prev, {
         role: 'error',
         content: `Error: ${error.message}`,
         key: Date.now()
-      }]);
+      }], 'error');
     } finally {
       setIsProcessing(false);
-      setActivity(null);
+      activityUpdate.updateImmediate(null);
     }
   }, [conversation, isProcessing, updateTokenStats]);
 

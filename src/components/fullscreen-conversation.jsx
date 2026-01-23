@@ -46,9 +46,9 @@ function ToolExecutionCard({ tool }) {
 }
 
 /**
- * 全屏对话组件
+ * 全屏对话组件（使用 React.memo 优化渲染性能）
  */
-function FullscreenConversation({ messages, tokenStats, toolExecutions = [] }) {
+const FullscreenConversation = React.memo(function FullscreenConversation({ messages, tokenStats, toolExecutions = [] }) {
 
   // 计算token使用颜色
   const getTokenColor = () => {
@@ -150,6 +150,6 @@ function FullscreenConversation({ messages, tokenStats, toolExecutions = [] }) {
       </Box>
     </Box>
   );
-}
+});
 
 export default FullscreenConversation;
