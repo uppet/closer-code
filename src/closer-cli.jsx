@@ -24,7 +24,10 @@ import path from 'path';
 function Panel({ title, children, borderColor = 'gray', flex = 1 }) {
   return (
     <Box
-      borderStyle="round"
+      borderTop={true}
+      borderBottom={true}
+      borderLeft={false}
+      borderRight={false}
       borderColor={borderColor}
       flexDirection="column"
       flexGrow={flex}
@@ -283,6 +286,7 @@ function App() {
   const [input, setInput] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [fullscreenMode, setFullscreenMode] = useState(false);
+  const [showToolsInFullscreen, setShowToolsInFullscreen] = useState(true); // 全屏模式下是否显示工具
   const [currentPlan, setCurrentPlan] = useState(null);
   const [toolExecutions, setToolExecutions] = useState([]);
   const [status, setStatus] = useState('Initializing...');
@@ -302,7 +306,7 @@ function App() {
 
   const thinkingUpdate = useSmartThrottledState(setThinking, {
     throttleDelay: 1500,
-    immediateTypes: ['tool_start', 'tool_complete', 'thinking_signature', 
+    immediateTypes: ['tool_start', 'tool_complete', 'thinking_signature',
                     'thinking_redacted', 'abort']
   });
 
@@ -376,7 +380,7 @@ function App() {
   // Thinking区域滚动管理
   const [thinkingLines, setThinkingLines] = useState([]); // 所有thinking行
   const thinkingHeight = 4; // Thinking区域固定显示4行（增加1行以便更好查看标题）
-  
+
   // Ctrl+C 退出控制
   const [lastCtrlC, setLastCtrlC] = useState(0);
   const [showExitHint, setShowExitHint] = useState(false);
@@ -447,14 +451,25 @@ function App() {
       return;
     }
 
-    // 处理 Ctrl+T - 切换工具详情面板
+    // 处理 Ctrl+T - 全屏模式下切换工具显示，普通模式下切换工具详情面板
     if (key.ctrl && input === 't') {
-      setShowToolDetail(prev => {
-        const newValue = !prev;
-        setActivity(newValue ? '📋 工具详情面板已打开' : '📋 工具详情面板已关闭');
-        setTimeout(() => setActivity(null), 1500);
-        return newValue;
-      });
+      if (fullscreenMode) {
+        // 全屏模式：切换工具显示
+        setShowToolsInFullscreen(prev => {
+          const newValue = !prev;
+          setActivity(newValue ? '🔧 工具显示已开启' : '🚫 工具显示已关闭');
+          setTimeout(() => setActivity(null), 1500);
+          return newValue;
+        });
+      } else {
+        // 普通模式：切换工具详情面板
+        setShowToolDetail(prev => {
+          const newValue = !prev;
+          setActivity(newValue ? '📋 工具详情面板已打开' : '📋 工具详情面板已关闭');
+          setTimeout(() => setActivity(null), 1500);
+          return newValue;
+        });
+      }
       return;
     }
 
@@ -494,30 +509,11 @@ function App() {
       return;
     }
 
-    // 处理历史记录导航（方向键）
-    // 优先处理历史记录导航，其次才是滚动
+    // 方向键：让 MultilineTextInput 处理历史记录导航和多行光标移动
+    // 父组件不再拦截这些事件
     if (key.upArrow || key.downArrow) {
-      // 尝试导航历史记录
-      const direction = key.upArrow ? 'up' : 'down';
-      const historyResult = inputHistory.navigate(direction, inputRef.current);
-      
-      if (historyResult !== null) {
-        // 历史记录导航成功
-        setInput(historyResult);
-        inputRef.current = historyResult;
-        return; // 阻止事件继续传播
-      }
-      
-      // 没有历史记录或已到边界，尝试滚动
-      // 仅在输入框为空时滚动（避免与光标移动冲突）
-      if (inputRef.current.length === 0) {
-        if (key.upArrow) {
-          setScrollPosition(prev => Math.max(0, prev - 1));
-        } else if (key.downArrow) {
-          const maxPosition = Math.max(0, messageLines.length - conversationHeight);
-          setScrollPosition(prev => Math.min(maxPosition, prev + 1));
-        }
-      }
+      // 始终让子组件处理
+      return false;
     }
 
     // 处理滚动（使用自定义滚动系统）
@@ -573,7 +569,7 @@ function App() {
         // 从配置中获取token限制
         const provider = cfg.ai?.provider || 'anthropic';
         const tokenLimit = cfg.ai?.[provider]?.maxTokens || 4096;
-        
+
         // 更新token统计状态
         setTokenStats(prev => ({
           ...prev,
@@ -620,7 +616,7 @@ Type your message or command to get started.`
       const newOutput = prev.output + newOutputTokens;
       const newTotal = newInput + newOutput;
       const newPercentage = Math.round((newTotal / prev.limit) * 100);
-      
+
       return {
         ...prev,
         input: newInput,
@@ -750,7 +746,7 @@ Type your message or command to get started.`
                   const content = entry.replace(/^🤔 \[.*?\] /, '');
                   return sum + content.length;
                 }, 0);
-              
+
               newThinking.push(`✅ [${new Date().toLocaleTimeString()}] Thinking 完成 (${totalThinkingLength} 字符, ~${Math.ceil(totalThinkingLength/4)} tokens)`);
               return newThinking.slice(-30);
             }, 'thinking_signature');
@@ -1063,6 +1059,7 @@ Tips:
         messages={messages}
         tokenStats={tokenStats}
         toolExecutions={toolExecutions}
+        showTools={showToolsInFullscreen}
       />
     );
   }
@@ -1075,7 +1072,7 @@ Tips:
   }
 
   return (
-    <Box flexDirection="column" padding={1} height="100%">
+    <Box flexDirection="column" padding={1}>
       {/* 顶部状态栏 */}
       <Box
         borderStyle="bold"
@@ -1097,10 +1094,13 @@ Tips:
 
       {/* Thinking 区域 - 占17.5%高度 */}
       <Box
-        borderStyle="round"
+        borderTop={true}
+        borderBottom={true}
+        borderLeft={false}
+        borderRight={false}
+	borderStyle="single"
         borderColor="cyan"
         flexDirection="column"
-        flexGrow={17.5}
         marginBottom={1}
         width="100%"
       >
@@ -1110,7 +1110,7 @@ Tips:
             <Text dim color="gray"> [Tab: {thinkingEnabled ? 'ON ✅' : 'OFF ❌'}] [Shift+↑/↓: Scroll]</Text>
           </Text>
         </Box>
-        <Box flexGrow={1} flexDirection="column" overflow="hidden" width="100%">
+        <Box  flexDirection="column" width="100%">
           {thinkingLines.length > 0 ? (
             <>
               {/* 滚动提示 */}
@@ -1131,7 +1131,7 @@ Tips:
               />
             </>
           ) : (
-            <Box justifyContent="center" alignItems="center" height="100%">
+            <Box justifyContent="center" alignItems="center">
               <Text dim color="gray">No thinking messages yet</Text>
             </Box>
           )}
@@ -1139,25 +1139,29 @@ Tips:
       </Box>
 
       {/* 主内容区域 - 工具详情面板打开时占50%，否则占65% */}
-      <Box flexGrow={showToolDetail ? 40 : 65} flexDirection="row">
+      <Box flexDirection="row">
         <Box width="100%">
           {/* 左侧：对话面板 - 占67%宽度 */}
           <Box
-            borderStyle="round"
             borderColor="blue"
+            borderTop={true}
+            borderBottom={true}
+            borderLeft={false}
+            borderRight={false}
+	    borderStyle="single"
             flexDirection="column"
             flexGrow={67}
             marginRight={1}
             width="67%"
-            height="100%"
+            height="60%"
           >
             <Box borderBottom={false} borderColor="blue" paddingBottom={0} marginBottom={1}>
               <Text bold color="blue">
-                💬 Conversation 
+                💬 Conversation
                 <Text color={getTokenColor()}> [Tokens: {tokenStats.total.toLocaleString()}/{tokenStats.limit.toLocaleString()}]</Text>
               </Text>
             </Box>
-            <Box flexDirection="column" overflow="hidden" width="100%" height="100%">
+            <Box flexDirection="column" overflow="hidden" width="100%">
               {messageLines.length > 0 ? (
                 <>
                   {/* 滚动提示 */}
@@ -1178,7 +1182,7 @@ Tips:
                   />
                 </>
               ) : (
-                <Box justifyContent="center" alignItems="center" height="100%">
+                <Box justifyContent="center" alignItems="center" height="60%">
                   <Text dim>No messages yet</Text>
                 </Box>
               )}
@@ -1186,10 +1190,14 @@ Tips:
           </Box>
 
           {/* 右侧：任务和工具面板 - 占33%宽度 */}
-          <Box flexDirection="column" flexGrow={33} width="33%" height="100%">
+          <Box flexDirection="column" flexGrow={33} width="33%" height="60%">
             {/* 任务进度 - 占46%高度（减少4个单位以减少2行高度） */}
             <Box
-              borderStyle="round"
+              borderTop={true}
+              borderBottom={true}
+              borderLeft={false}
+              borderRight={false}
+	      borderStyle="single"
               borderColor="yellow"
               flexDirection="column"
               flexGrow={46}
@@ -1208,7 +1216,11 @@ Tips:
 
             {/* 工具执行 - 占54%高度（相应增加以保持平衡） */}
             <Box
-              borderStyle="round"
+              borderTop={true}
+              borderBottom={true}
+              borderLeft={false}
+              borderRight={false}
+	      borderStyle="single"
               borderColor="green"
               flexDirection="column"
               flexGrow={54}
@@ -1233,7 +1245,9 @@ Tips:
       {/* 活动提示 */}
       {activity && (
         <Box
-          borderStyle="round"
+          borderTop={true}
+          borderBottom={true}
+          borderStyle="single"
           borderColor={abortMessage ? "red" : "yellow"}
           paddingX={1}
           marginTop={1}
@@ -1246,7 +1260,9 @@ Tips:
       {/* 退出提示 */}
       {showExitHint && (
         <Box
-          borderStyle="round"
+          borderTop={true}
+          borderBottom={true}
+          borderStyle="single"
           borderColor="red"
           paddingX={1}
           marginTop={1}
@@ -1268,27 +1284,32 @@ Tips:
       )}
 
       {/* 输入区域 */}
-      <Box
-        borderStyle="double"
-        borderColor="cyan"
-        paddingX={1}
-        marginTop={activity ? 0 : 1}
-      >
-        <Box marginRight={1}>
-          <Text bold color="cyan">❯</Text>
+      <Box flexDirection="column" marginTop={activity ? 0 : 1}>
+        {/* 输入区域标记 */}
+        <Box marginBottom={1} paddingLeft={1}>
+          <Text dim color="cyan">
+            {isProcessing ? '⏳ 处理中...' : '▶ 输入消息'}
+          </Text>
+          <Text dim color="gray">
+            {' '}(Enter发送, Ctrl+Enter换行)
+          </Text>
         </Box>
-        <EnhancedTextInputWithShortcuts
-          value={input}
-          onChange={(value) => {
-            setInput(value);
-            inputRef.current = value;
-          }}
-          onSubmit={handleSubmit}
-          placeholder="Type a message or /help for commands..."
-          disabled={isProcessing}
-          history={inputHistory}
-          showHistoryIndicator={true}
-        />
+
+        {/* 输入框 - 无边框，方便鼠标复制 */}
+        <Box paddingLeft={1} paddingRight={1}>
+          <EnhancedTextInputWithShortcuts
+            value={input}
+            onChange={(value) => {
+              setInput(value);
+              inputRef.current = value;
+            }}
+            onSubmit={handleSubmit}
+            placeholder="在这里输入..."
+            disabled={isProcessing}
+            history={inputHistory}
+            showHistoryIndicator={true}
+          />
+        </Box>
       </Box>
     </Box>
   );

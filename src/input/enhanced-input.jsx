@@ -2,14 +2,14 @@
  * 增强型输入组件
  *
  * 功能：
+ * - 全程多行输入
  * - 支持历史记录导航（上下箭头）
- * - 支持快捷键（Ctrl+A/E/U/K/W等）
+ * - Enter 发送，Ctrl+Enter 换行
  * - 显示历史记录状态
- * - 使用自定义的 EnhancedTextInputCore（支持光标位置控制）
  */
 
 import React, { useState, useRef, useEffect } from 'react';
-import { EnhancedTextInput as EnhancedTextInputCore } from '../components/ink-text-input';
+import { MultilineTextInput } from '../components/multiline-text-input.jsx';
 import { Text } from 'ink';
 
 export function EnhancedTextInput({
@@ -103,15 +103,19 @@ export function EnhancedTextInput({
 
     const stats = history.getStats();
     const currentIndex = stats.currentIndex;
-    
-    // 只有在浏览历史时才显示指示器
-    if (currentIndex === -1) {
-      return null;
-    }
-
-    const position = currentIndex + 1;
     const total = stats.total;
 
+    // 始终显示历史记录指示器
+    if (currentIndex === -1) {
+      // 没有浏览历史时，显示总数量
+      if (total === 0) {
+        return <Text dim color="gray"> [history: empty]</Text>;
+      }
+      return <Text dim color="gray"> [history: {total} entries, ↑/↓ to browse]</Text>;
+    }
+
+    // 正在浏览历史，显示当前位置
+    const position = currentIndex + 1;
     return (
       <Text dim color="gray"> [history: {position}/{total}]</Text>
     );
@@ -119,14 +123,13 @@ export function EnhancedTextInput({
 
   return (
     <>
-      <EnhancedTextInputCore
-        value={internalValue}
+      <MultilineTextInput
+        initialValue={internalValue}
         onChange={handleChange}
         onSubmit={handleSubmit}
         placeholder={placeholder}
         focus={focus}
-        enableShortcuts={true}
-        {...props}
+        onHistoryNavigation={handleHistoryNavigation}
       />
       {renderHistoryIndicator()}
     </>
@@ -152,10 +155,11 @@ export function EnhancedTextInputWithShortcuts({
   history,
   focus = true,
   showHistoryIndicator = true,
+  maxHeight = 10,
   ...props
 }) {
   const [internalValue, setInternalValue] = useState(value);
-  const [cursorPosition, setCursorPosition] = useState(0);
+  const [historyKey, setHistoryKey] = useState(0);  // 用于强制刷新历史指示器
   const inputRef = useRef('');
 
   // 同步外部 value 变化
@@ -179,11 +183,6 @@ export function EnhancedTextInputWithShortcuts({
     }
   };
 
-  // 处理光标位置变化
-  const handleCursorChange = (newPosition) => {
-    setCursorPosition(newPosition);
-  };
-
   // 处理提交
   const handleSubmit = (submittedValue) => {
     const trimmed = submittedValue.trim();
@@ -195,11 +194,31 @@ export function EnhancedTextInputWithShortcuts({
 
     // 清空输入
     setInternalValue('');
-    setCursorPosition(0);
     inputRef.current = '';
 
     if (onSubmit) {
       onSubmit(submittedValue);
+    }
+  };
+
+  // 处理历史记录导航
+  const handleHistoryNavigation = (direction) => {
+    if (!history) {
+      return;
+    }
+
+    const result = history.navigate(direction, internalValue);
+    
+    if (result !== null) {
+      setInternalValue(result);
+      inputRef.current = result;
+      
+      // 强制刷新历史指示器
+      setHistoryKey(prev => prev + 1);
+      
+      if (onChange) {
+        onChange(result);
+      }
     }
   };
 
@@ -211,32 +230,35 @@ export function EnhancedTextInputWithShortcuts({
 
     const stats = history.getStats();
     const currentIndex = stats.currentIndex;
-
-    // 只有在浏览历史时才显示指示器
-    if (currentIndex === -1) {
-      return null;
-    }
-
-    const position = currentIndex + 1;
     const total = stats.total;
 
+    // 始终显示历史记录指示器
+    if (currentIndex === -1) {
+      // 没有浏览历史时，显示总数量
+      if (total === 0) {
+        return <Text dim color="gray"> [history: empty]</Text>;
+      }
+      return <Text dim color="gray"> [history: {total} entries, ↑/↓ to browse]</Text>;
+    }
+
+    // 正在浏览历史，显示当前位置
+    const position = currentIndex + 1;
     return (
       <Text dim color="gray"> [history: {position}/{total}]</Text>
     );
   };
 
+  // 全程多行模式
   return (
     <>
-      <EnhancedTextInputCore
-        value={internalValue}
-        cursorPosition={cursorPosition}
+      <MultilineTextInput
+        initialValue={internalValue}
         onChange={handleChange}
-        onCursorChange={handleCursorChange}
         onSubmit={handleSubmit}
-        placeholder={placeholder}
+        maxHeight={maxHeight}
         focus={focus}
-        enableShortcuts={true}
-        {...props}
+        placeholder={placeholder || '输入消息... (Enter发送, Ctrl+Enter换行, Ctrl+L清空)'}
+        onHistoryNavigation={handleHistoryNavigation}
       />
       {renderHistoryIndicator()}
     </>

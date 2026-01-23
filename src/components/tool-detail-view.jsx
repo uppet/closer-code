@@ -45,9 +45,11 @@ export function ToolDetailPanel({
   const selectedTool = tools[safeIndex];
   
   return (
-    <Box 
+    <Box
       flexDirection="column"
-      borderStyle="double"
+      borderTop={true}
+      borderBottom={true}
+      borderStyle="single"
       borderColor="cyan"
       paddingX={1}
       height={height}

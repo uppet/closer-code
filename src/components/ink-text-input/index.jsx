@@ -29,6 +29,7 @@ export function EnhancedTextInput({
   onCursorChange,
   onChange,
   onSubmit,
+  onEnterMultiline,
   enableShortcuts = true
 }) {
   // 初始化光标位置
@@ -121,6 +122,12 @@ export function EnhancedTextInput({
         (key.ctrl && input === 'g') ||
         key.tab ||
         (key.shift && key.tab)) {
+      return;
+    }
+
+    // Ctrl+Enter: 进入多行模式
+    if (key.ctrl && key.return && onEnterMultiline) {
+      onEnterMultiline();
       return;
     }
 

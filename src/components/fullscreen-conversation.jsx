@@ -48,7 +48,7 @@ function ToolExecutionCard({ tool }) {
 /**
  * 全屏对话组件（使用 React.memo 优化渲染性能）
  */
-const FullscreenConversation = React.memo(function FullscreenConversation({ messages, tokenStats, toolExecutions = [] }) {
+const FullscreenConversation = React.memo(function FullscreenConversation({ messages, tokenStats, toolExecutions = [], showTools = true }) {
 
   // 计算token使用颜色
   const getTokenColor = () => {
@@ -61,7 +61,7 @@ const FullscreenConversation = React.memo(function FullscreenConversation({ mess
   // 将消息和工具执行按时间顺序混合
   const getMixedContent = () => {
     const content = [];
-    
+
     // 添加消息
     messages.forEach((message, index) => {
       content.push({
@@ -71,17 +71,19 @@ const FullscreenConversation = React.memo(function FullscreenConversation({ mess
         timestamp: message.timestamp || index
       });
     });
-    
-    // 添加工具执行
-    toolExecutions.forEach((tool, index) => {
-      content.push({
-        type: 'tool',
-        data: tool,
-        key: tool.id || `tool-${index}`,
-        timestamp: tool.id || Date.now() + index
+
+    // 添加工具执行（仅在 showTools 为 true 时）
+    if (showTools) {
+      toolExecutions.forEach((tool, index) => {
+        content.push({
+          type: 'tool',
+          data: tool,
+          key: tool.id || `tool-${index}`,
+          timestamp: tool.id || Date.now() + index
+        });
       });
-    });
-    
+    }
+
     // 按时间戳排序（保持原有顺序，工具执行插入到对应位置）
     // 由于消息没有精确时间戳，我们保持消息在前，工具在后的顺序
     // 实际上工具执行是在 AI 响应过程中发生的，所以放在消息之后
@@ -146,7 +148,7 @@ const FullscreenConversation = React.memo(function FullscreenConversation({ mess
 
       {/* 底部提示 - 简洁无边框 */}
       <Box paddingX={1} marginTop={1}>
-        <Text dim>💡 鼠标选择复制 | 滚轮滚动 | Ctrl+G 返回</Text>
+        <Text dim>💡 鼠标选择复制 | 滚轮滚动 | Ctrl+G 返回 | Ctrl+T {showTools ? '隐藏' : '显示'}工具</Text>
       </Box>
     </Box>
   );
