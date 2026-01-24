@@ -1,6 +1,6 @@
 {
   "name": "closer-code",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "AI 编程助理 - 通过对话完成编码、调试和任务规划",
   "main": "dist/index.js",
   "type": "module",
@@ -36,7 +36,11 @@
     "programming",
     "automation"
   ],
-  "author": "",
+  "repository": "uppet/closer-code",
+  "author": {
+    "name": "Joyer Huang",
+    "url": "https://github.com/uppet"
+  },
   "license": "MIT",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",
