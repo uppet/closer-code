@@ -1043,8 +1043,65 @@ Type your message or command to get started.`
 /status - Show conversation summary
 /history - Show input history statistics
 /keys - Show keyboard shortcuts reference
+/config - Show current configuration
 /help - Show this help message`
         }]);
+        break;
+
+      case '/config':
+        setActivity('⚙️ 加载配置信息...');
+        const configPaths = getConfigPaths();
+        const currentConfig = getConfig();
+        
+        // 格式化配置信息
+        const providerNames = {
+          anthropic: 'Anthropic Claude',
+          openai: 'OpenAI GPT',
+          deepseek: 'DeepSeek',
+          ollama: 'Ollama (本地)'
+        };
+        
+        const provider = currentConfig.ai?.provider || 'anthropic';
+        const providerConfig = currentConfig.ai?.[provider] || {};
+        
+        const configInfo = {
+          role: 'system',
+          content: `当前配置
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🤖 AI 配置
+  提供商: ${providerNames[provider] || provider}
+  模型: ${providerConfig.model || '默认'}
+  Token 限制: ${providerConfig.maxTokens || 4096}
+  API Key: ${providerConfig.apiKey ? '已设置' : '未设置'}
+
+📁 行为配置
+  工作目录: ${currentConfig.behavior?.workingDir || process.cwd()}
+  自动计划: ${currentConfig.behavior?.autoPlan ? '开启' : '关闭'}
+  自动执行: ${currentConfig.behavior?.autoExecute ? '开启' : '关闭'}
+  最大重试: ${currentConfig.behavior?.maxRetries || 3}
+  超时时间: ${currentConfig.behavior?.timeout || 30000}ms
+
+🔧 工具配置
+  启用工具: ${currentConfig.tools?.enabled?.length || 0} 个
+
+🖥️ UI 配置
+  主题: ${currentConfig.ui?.theme || 'default'}
+  显示行号: ${currentConfig.ui?.showLineNumbers ? '开启' : '关闭'}
+  最大输出行: ${currentConfig.ui?.maxOutputLines || 100}
+
+📁 配置文件
+  全局配置: ${configPaths.global}
+  项目配置: ${configPaths.project || '未找到'}
+  当前使用: ${configPaths.active}
+
+🔧 操作提示
+  • 使用 \`cloco config\` 命令管理配置
+  • 使用 \`cloco setup\` 重新运行配置向导
+  • 使用环境变量存储敏感信息更安全
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
+        };
+        setMessages(prev => [...prev, configInfo]);
+        setActivity(null);
         break;
 
       case '/history':
