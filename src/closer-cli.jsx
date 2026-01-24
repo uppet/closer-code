@@ -1001,6 +1001,37 @@ Type your message or command to get started.`
         setActivity(null);
         break;
 
+      case '/keys':
+        setMessages(prev => [...prev, {
+          role: 'system',
+          content: `快捷键参考：
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🖥️  模式切换
+  Ctrl+G    切换全屏模式
+  Ctrl+T    切换工具详情/工具显示
+  Tab       开关 Thinking 显示
+
+📝 输入控制
+  Enter     发送消息
+  Ctrl+Enter 多行模式下换行
+  Ctrl+O    切换多行输入模式
+
+🔄 滚动控制
+  Alt+↑/↓   精确滚动一行
+  PageUp/Down 快速滚动
+  Shift+↑/↓ 滚动 Thinking 或切换工具
+
+⚡ 任务控制
+  Ctrl+C    单击中止任务 / 双击退出
+  Ctrl+Z    挂起程序（Linux/Mac）
+
+❓ 帮助
+  /help     显示所有命令
+  /keys     显示本快捷键参考
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
+        }]);
+        break;
+
       case '/help':
         setMessages(prev => [...prev, {
           role: 'system',
@@ -1011,6 +1042,7 @@ Type your message or command to get started.`
 /learn - Learn project patterns
 /status - Show conversation summary
 /history - Show input history statistics
+/keys - Show keyboard shortcuts reference
 /help - Show this help message`
         }]);
         break;
