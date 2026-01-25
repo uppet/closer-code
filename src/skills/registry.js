@@ -23,8 +23,10 @@ export class SkillRegistry {
 
     // 缓存
     this.skillCache = new Map(); // name -> skill object
+    this.skillPathCache = new Map(); // name -> path
     this.discoveryCache = new Map(); // query -> skills list
     this.cacheTimeout = 5 * 60 * 1000; // 5分钟缓存
+    this.maxCacheSize = 100; // 最大缓存条目数
 
     // 初始化标志
     this.initialized = false;
@@ -81,10 +83,13 @@ export class SkillRegistry {
   async discover(options = {}) {
     await this.initialize();
 
+    // 清理过期缓存
+    this.cleanupExpiredCache();
+
     const { query = '', category = '' } = options;
 
-    // 生成缓存键
-    const cacheKey = JSON.stringify({ query, category });
+    // 生成缓存键（使用更高效的方式）
+    const cacheKey = `${query || ''}:${category || ''}`;
 
     // 检查缓存
     if (this.discoveryCache.has(cacheKey)) {
@@ -183,7 +188,7 @@ export class SkillRegistry {
           }
           
           const skillFile = path.join(skillDir, skillFileName);
-          
+
           // 快速解析 front-matter
           const skillInfo = await parseSkillFrontmatter(skillFile);
           if (skillInfo) {
@@ -192,8 +197,15 @@ export class SkillRegistry {
               source: dir // 记录来源，用于去重
             });
           }
-        } catch {
-          // 目录不存在或解析失败，跳过
+        } catch (error) {
+          // 根据错误类型决定是否跳过
+          if (error.code === 'ENOENT' || error.code === 'EACCES') {
+            // 目录不存在或无权限，跳过
+            continue;
+          }
+
+          // 其他错误记录日志但不中断
+          console.warn(`[Skills] Failed to scan directory "${skillDir}":`, error.message);
           continue;
         }
       }
@@ -233,22 +245,35 @@ export class SkillRegistry {
   async loadByName(name) {
     await this.initialize();
 
+    // 验证技能名称
+    if (!name || typeof name !== 'string') {
+      console.error('[Skills] Invalid skill name:', name);
+      return null;
+    }
+
     // 检查缓存
     if (this.skillCache.has(name)) {
       return this.skillCache.get(name);
     }
 
     try {
-      // 发现技能以获取路径
-      const skills = await this.discover();
-      const skillInfo = skills.find(s => s.name === name);
+      let skillPath = this.skillPathCache.get(name);
 
-      if (!skillInfo) {
-        return null;
+      if (!skillPath) {
+        // 只在缓存未命中时才扫描
+        const skills = await this.discover();
+        const skillInfo = skills.find(s => s.name === name);
+
+        if (!skillInfo) {
+          return null;
+        }
+
+        skillPath = skillInfo.path;
+        this.skillPathCache.set(name, skillPath);
       }
 
       // 完整加载技能
-      const skill = await parseSkill(skillInfo.path);
+      const skill = await parseSkill(skillPath);
 
       // 缓存
       this.skillCache.set(name, skill);
@@ -283,6 +308,31 @@ export class SkillRegistry {
     this.skillCache.clear();
     this.discoveryCache.clear();
     console.log('[Skills] Cache cleared');
+  }
+
+  /**
+   * 清理过期的缓存项
+   */
+  cleanupExpiredCache() {
+    const now = Date.now();
+    let cleaned = 0;
+
+    for (const [key, value] of this.discoveryCache.entries()) {
+      if (now - value.timestamp >= this.cacheTimeout) {
+        this.discoveryCache.delete(key);
+        cleaned++;
+      }
+    }
+
+    if (cleaned > 0) {
+      console.log(`[Skills] Cleaned ${cleaned} expired cache entries`);
+    }
+
+    // 如果缓存仍然太大，清空所有缓存
+    if (this.discoveryCache.size > 100) {
+      console.warn(`[Skills] Cache too large (${this.discoveryCache.size} entries), clearing all`);
+      this.discoveryCache.clear();
+    }
   }
 
   /**
