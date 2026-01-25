@@ -183,7 +183,16 @@ export class Conversation {
 
     // 添加 workflow 测试提示词（如果需要）
     if (this.workflowTest) {
-      this.systemPrompt += WORKFLOW_SYSTEM_PROMPT;
+      // systemPrompt 可能是数组（分段式）或字符串（兼容旧版）
+      if (Array.isArray(this.systemPrompt)) {
+        this.systemPrompt.push({
+          type: 'text',
+          cache_control: { type: 'ephemeral' },
+          text: WORKFLOW_SYSTEM_PROMPT
+        });
+      } else {
+        this.systemPrompt += WORKFLOW_SYSTEM_PROMPT;
+      }
     }
   }
 

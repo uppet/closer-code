@@ -2,6 +2,7 @@
  * 系统提示词构建器
  *
  * 提供灵活的方式来构建和优化 AI 助手的系统提示词
+ * 采用分段式设计，支持 prompt caching，降低 API 成本
  */
 
 import { loadMemory } from './config.js';
@@ -45,7 +46,19 @@ async function readProjectCloco() {
 }
 
 /**
- * 构建系统提示词（优化后的版本）
+ * 构建系统提示词（分段式设计 - 支持 prompt caching）
+ * 
+ * 返回格式：Array of objects，每个元素包含 text 和可选的 cache_control
+ * 
+ * 优势：
+ * 1. 每个段落独立缓存，可部分复用
+ * 2. 降低 API 调用成本（prompt caching）
+ * 3. 便于动态调整内容
+ * 
+ * @param {Object} config - 配置对象
+ * @param {boolean} workflowTest - 是否为工作流测试模式
+ * @param {Array} activeSkills - 已加载的技能列表
+ * @returns {Array} 分段式系统提示词
  */
 export async function getSystemPrompt(config, workflowTest = false, activeSkills = null) {
   const memory = loadMemory();
@@ -63,8 +76,15 @@ export async function getSystemPrompt(config, workflowTest = false, activeSkills
     // 暂时留空，后面会处理
   }
 
-  // 构建完整的系统提示词
-  let prompt = `You are Closer, an AI programming assistant designed to help developers with coding tasks, debugging, and project management.
+  // 构建分段式系统提示词
+  // 每个段落独立缓存，便于复用和降低成本
+  
+  const systemPrompt = [];
+
+  // 段落 1: 核心身份和工具使用指南（静态内容，可缓存）
+  systemPrompt.push({
+    type: 'text',
+    text: `You are Closer, an AI programming assistant designed to help developers with coding tasks, debugging, and project management.
 
 ## 🛠️ Tool Usage (CRITICAL - Read Carefully)
 
@@ -146,9 +166,14 @@ bash({ command: "find /usr -name '*.h'" })
 bashResult({ result_id: "res_123", action: "tail", lines: 100 })
 \`\`\`
 
-**bashResult actions:** head, tail, lineRange, grep, full
+**bashResult actions:** head, tail, lineRange, grep, full`
+  });
 
-## ⚠️ Error Handling
+  // 段落 2: 错误处理和任务执行指南（静态内容，可缓存）
+  systemPrompt.push({
+    type: 'text',
+    cache_control: { type: 'ephemeral' },
+    text: `## ⚠️ Error Handling
 
 When a tool returns an error:
 1. **Identify** the error type (ENOENT, EACCES, etc.)
@@ -169,9 +194,11 @@ When asked to analyze or review code:
 - Focus on files that are most relevant to the task
 - Provide specific findings with file names and line numbers
 
-**NOTE**: Only perform comprehensive analysis when explicitly requested. For specific questions, focus on the relevant parts.
+**NOTE**: Only perform comprehensive analysis when explicitly requested. For specific questions, focus on the relevant parts.`
+  });
 
-## 📍 Current Context
+  // 段落 3: 当前上下文和项目信息（动态内容，需要缓存）
+  const contextPrompt = `## 📍 Current Context
 Working Directory: ${config.behavior.workingDir}
 Available Tools: ${config.tools.enabled.join(', ')}
 ${projectInfo ? `
@@ -183,57 +210,70 @@ ${JSON.stringify(projectInfo.patterns, null, 2)}
 ## ⚙️ Behavior Configuration
 - Auto Plan: ${config.behavior.autoPlan ? 'Enabled' : 'Disabled'}
 - Auto Execute: ${config.behavior.autoExecute ? 'Enabled (low-risk operations only)' : 'Disabled'}
-- Confirm Destructive: ${config.behavior.confirmDestructive ? 'Enabled' : 'Disabled'}
+- Confirm Destructive: ${config.behavior.confirmDestructive ? 'Enabled' : 'Disabled'}`;
 
-${globalClocoContent ? `
-## 📋 Global Behavior Guidelines (CRITICAL)
+  systemPrompt.push({
+    type: 'text',
+    cache_control: { type: 'ephemeral' },
+    text: contextPrompt
+  });
+
+  // 段落 4: 全局行为指南（动态内容，需要缓存）
+  if (globalClocoContent) {
+    systemPrompt.push({
+      type: 'text',
+      cache_control: { type: 'ephemeral' },
+      text: `## 📋 Global Behavior Guidelines (CRITICAL)
 **The following global guidelines from ~/.closer-code/cloco.md are EXTREMELY IMPORTANT and MUST be followed:**
 
 ${globalClocoContent}
 
-**These global guidelines take precedence over general instructions. Follow them carefully**
-` : ''}
+**These global guidelines take precedence over general instructions. Follow them carefully**`
+    });
+  }
 
-${projectClocoContent ? `
-## 📋 Project Behavior Guidelines (CRITICAL)
+  // 段落 5: 项目行为指南（动态内容，需要缓存）
+  if (projectClocoContent) {
+    systemPrompt.push({
+      type: 'text',
+      cache_control: { type: 'ephemeral' },
+      text: `## 📋 Project Behavior Guidelines (CRITICAL)
 **The following project-specific guidelines from ./cloco.md are EXTREMELY IMPORTANT and MUST be followed:**
 
 ${projectClocoContent}
 
-**These project guidelines take precedence over general instructions. Follow them carefully**
-` : ''}
-
-${!globalClocoContent && !projectClocoContent ? `
-## 📋 Behavior Guidelines
-No custom behavior guidelines found. You can add them by:
-- Creating ~/.closer-code/cloco.md for global guidelines
-- Creating ./cloco.md for project-specific guidelines
-` : ''}${workflowPrompt}`;
-
-  // 添加已加载的技能
-  if (activeSkills && activeSkills.length > 0) {
-    prompt += `
-
-## 🎯 Loaded Skills
-
-The following skills are available for use in this conversation:
-
-`;
-
-    for (const skill of activeSkills) {
-      prompt += `### ${skill.name}
-
-${skill.description}
-
-${skill.content}
-
----
-`;
-    }
-
-    prompt += `You can use these skills to help the user. Please carefully read the skill documentation, understand their capabilities and usage, then assist the user with their tasks.
-`;
+**These project guidelines take precedence over general instructions. Follow them carefully**`
+    });
   }
 
-  return prompt;
+  // 段落 6: 如果没有自定义指南，提示用户（静态内容，可缓存）
+  if (!globalClocoContent && !projectClocoContent) {
+    systemPrompt.push({
+      type: 'text',
+      cache_control: { type: 'ephemeral' },
+      text: `## 📋 Behavior Guidelines
+No custom behavior guidelines found. You can add them by:
+- Creating ~/.closer-code/cloco.md for global guidelines
+- Creating ./cloco.md for project-specific guidelines`
+    });
+  }
+
+  // 段落 7: 已加载的技能（动态内容，需要缓存）
+  if (activeSkills && activeSkills.length > 0) {
+    let skillsPrompt = `\n## 🎯 Loaded Skills\n\nThe following skills are available for use in this conversation:\n\n`;
+
+    for (const skill of activeSkills) {
+      skillsPrompt += `### ${skill.name}\n\n${skill.description}\n\n${skill.content}\n\n---\n`;
+    }
+
+    skillsPrompt += `You can use these skills to help the user. Please carefully read the skill documentation, understand their capabilities and usage, then assist the user with their tasks.\n`;
+
+    systemPrompt.push({
+      type: 'text',
+      cache_control: { type: 'ephemeral' },
+      text: skillsPrompt
+    });
+  }
+
+  return systemPrompt;
 }
