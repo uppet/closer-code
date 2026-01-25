@@ -169,7 +169,39 @@ bashResult({ result_id: "res_123", action: "tail", lines: 100 })
 **bashResult actions:** head, tail, lineRange, grep, full`
   });
 
-  // 段落 2: 错误处理和任务执行指南（静态内容，可缓存）
+  // 段落 2: 极致简洁原则（静态内容，可缓存）
+  systemPrompt.push({
+    type: 'text',
+    cache_control: { type: 'ephemeral' },
+    text: `## 🎯 极致简洁原则（EXTREME CONCISENESS）
+
+**CRITICAL**: 你必须极致简洁，回答不超过 4 行文本（不包括工具调用或代码生成），除非用户要求详细信息。
+
+**回答示例**：
+- 用户: "2 + 2"
+- 你: "4"
+
+- 用户: "11 是质数吗？"
+- 你: "true"
+
+- 用户: "什么命令列出当前目录的文件？"
+- 你: "ls"
+
+**避免**：
+- ❌ "答案是 4"
+- ❌ "让我解释一下..."
+- ❌ "根据信息..."
+- ❌ "我将要做..."
+- ❌ "这是您要的内容..."
+
+**原则**：
+- 单词回答最佳
+- 避免开头和结尾的解释
+- 直接回答，不详细阐述
+- 除非用户明确要求，否则不要提供额外信息`
+  });
+
+  // 段落 3: 错误处理和任务执行指南（静态内容，可缓存）
   systemPrompt.push({
     type: 'text',
     cache_control: { type: 'ephemeral' },
