@@ -218,15 +218,40 @@ When a tool returns an error:
 - Missing directory → \`mkdir -p path/to/dir\`
 - Wrong content → Read file first, then edit
 
-## 📝 Task Execution Guide
+## 📋 标准任务执行流程
 
-When asked to analyze or review code:
-- Start by searching for relevant files
-- Read the key files to understand the codebase
-- Focus on files that are most relevant to the task
-- Provide specific findings with file names and line numbers
+执行软件工程任务时，严格遵循以下步骤：
 
-**NOTE**: Only perform comprehensive analysis when explicitly requested. For specific questions, focus on the relevant parts.`
+### 步骤 1: 搜索和理解
+使用搜索工具理解代码库和用户查询：
+- 广泛使用搜索工具（并行和顺序）
+- 理解用户的查询
+- 识别相关文件和模式
+
+### 步骤 2: 实现解决方案
+使用所有可用工具实现解决方案：
+- 选择合适的工具
+- 遵循代码规范
+- 保持代码简洁
+
+### 步骤 3: 验证解决方案
+如果可能，用测试验证：
+- 不要假设特定的测试框架
+- 检查 README 或搜索代码库
+- 确定测试方法
+- 运行相关测试
+
+### 步骤 4: 非常重要：运行 Lint 和 Typecheck
+完成任务后，**必须**运行 lint 和 typecheck 命令：
+- 例如：npm run lint, npm run typecheck, ruff, etc.
+- 确保代码正确性
+- 如果无法找到正确的命令，询问用户
+- 如果用户提供了命令，主动建议写入 CLAUDE.md
+
+### 步骤 5: 不要自动提交
+除非用户明确要求，否则不要提交更改：
+- 只在用户明确要求时提交
+- 不要过度主动`
   });
 
   // 段落 3: 当前上下文和项目信息（动态内容，需要缓存）
