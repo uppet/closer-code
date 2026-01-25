@@ -8,6 +8,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 
 import { BashRenderer } from './bash-renderer.jsx';
+import { BashResultRenderer } from './bash-result-renderer.jsx';
 import { FileReadRenderer } from './file-read-renderer.jsx';
 import { FileWriteRenderer } from './file-write-renderer.jsx';
 import { FileEditRenderer } from './file-edit-renderer.jsx';
@@ -20,6 +21,7 @@ import { ListRenderer } from './list-renderer.jsx';
 const TOOL_RENDERER_MAP = {
   // Bash 命令
   bash: BashRenderer,
+  bashResult: BashResultRenderer,
   
   // 文件读取
   readFile: FileReadRenderer,
@@ -169,6 +171,7 @@ export function ToolRenderer({ tool, maxHeight = 10, renderMode = 'split' }) {
 
 // 导出所有渲染器
 export { BashRenderer } from './bash-renderer.jsx';
+export { BashResultRenderer } from './bash-result-renderer.jsx';
 export { FileReadRenderer } from './file-read-renderer.jsx';
 export { FileWriteRenderer } from './file-write-renderer.jsx';
 export { FileEditRenderer } from './file-edit-renderer.jsx';
