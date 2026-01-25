@@ -1,0 +1,50 @@
+feat: 实现 Cloco Skills 功能 Phase 1 (MVP)
+
+基于设计文档 (bc9098af) 完成技能系统的核心实现。
+
+核心功能：
+- ✅ Skill Parser: YAML front-matter 解析
+- ✅ Skill Registry: 技能发现和加载
+- ✅ Conversation State: 会话状态管理
+- ✅ Skills Tools: skillDiscover 和 skillLoad
+- ✅ System Integration: 完整集成
+
+技术特性：
+- 简单的 Markdown + YAML 格式
+- 自动发现和加载技能
+- 智能缓存机制（5分钟）
+- 项目本地优先级
+- 动态 System Prompt 更新
+
+新增文件：
+- src/skills/parser.js
+- src/skills/registry.js
+- src/skills/conversation-state.js
+- src/skills/tools.js
+- src/skills/index.js
+- test-skills-phase1.js
+- test-skills-integration.js
+- SKILLS_*.md (文档)
+- ~/.closer-code/skills/hello-world/skill.md
+
+修改文件：
+- src/config.js (添加 skills 配置)
+- src/prompt-builder.js (集成技能)
+- src/tools.js (注册技能工具)
+- src/conversation/core.js (初始化技能系统)
+
+测试：
+- ✅ 单元测试全部通过
+- ✅ 示例技能已创建
+- ✅ 文档完善
+
+文档：
+- SKILLS_README.md - 总览
+- SKILLS_QUICK_START.md - 快速开始
+- SKILLS_PHASE1_SUMMARY.md - 实现总结
+- SKILLS_PHASE1_REPORT.md - 完成报告
+- SKILLS_PHASE1_CHECKLIST.md - 检查清单
+
+Phase 1 完成度：100%
+
+Co-Authored-By: Closer AI Assistant <closer@example.com>

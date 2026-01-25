@@ -93,6 +93,11 @@ export class Conversation {
 
     // 初始化工具执行器上下文
     setToolExecutorContext(config);
+
+    // 初始化技能系统（如果启用）
+    this.skillRegistry = null;
+    this.conversationState = null;
+    this.skillsEnabled = config.skills?.enabled ?? false;
   }
 
   /**
@@ -105,6 +110,11 @@ export class Conversation {
 
     // 初始化 MCP Servers
     await this.mcpIntegration.initialize();
+
+    // 初始化技能系统（如果启用）
+    if (this.skillsEnabled) {
+      await this.initializeSkills();
+    }
 
     // 加载历史
     const history = loadHistory(this.config.behavior.workingDir);
@@ -122,11 +132,54 @@ export class Conversation {
   }
 
   /**
+   * 初始化技能系统
+   */
+  async initializeSkills() {
+    try {
+      const { createSkillRegistry } = await import('../skills/index.js');
+      const { createConversationState } = await import('../skills/index.js');
+      const { createSkillTools } = await import('../skills/index.js');
+      const { setSkillTools } = await import('../tools.js');
+      const path = await import('path');
+      const os = await import('os');
+
+      // 创建技能注册表
+      this.skillRegistry = createSkillRegistry({
+        globalDir: path.join(os.homedir(), '.closer-code', 'skills'),
+        projectDir: path.join(this.config.behavior.workingDir, '.closer-code', 'skills'),
+        residentSkills: this.config.skills?.resident || []
+      });
+
+      // 初始化注册表
+      await this.skillRegistry.initialize();
+
+      // 创建会话状态
+      this.conversationState = createConversationState();
+
+      // 创建并注册技能工具
+      const skillTools = createSkillTools(this.skillRegistry, this.conversationState);
+      setSkillTools(skillTools);
+
+      console.log('[Skills] System initialized');
+    } catch (error) {
+      console.error('[Skills] Failed to initialize:', error.message);
+      // 不抛出错误，继续运行（只是不启用技能系统）
+      this.skillsEnabled = false;
+    }
+  }
+
+  /**
    * 构建系统提示
    */
   async buildSystemPrompt() {
     const { getSystemPrompt } = await import('../prompt-builder.js');
-    this.systemPrompt = await getSystemPrompt(this.config, this.workflowTest);
+
+    // 获取已加载的技能
+    const activeSkills = this.skillsEnabled && this.conversationState
+      ? this.conversationState.getActiveSkills()
+      : [];
+
+    this.systemPrompt = await getSystemPrompt(this.config, this.workflowTest, activeSkills);
 
     // 添加 workflow 测试提示词（如果需要）
     if (this.workflowTest) {

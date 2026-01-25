@@ -7,7 +7,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { render, Box, Text } from 'ink';
 import { useInput } from 'ink';
 import { createConversation } from './conversation.js';
-import { getConfig, updateConfig } from './config.js';
+import { getConfig, updateConfig, getConfigPaths } from './config.js';
 import { generateToolSummary } from './tools.js';
 import { createShortcutManager } from './shortcuts.js';
 import { createSnippetManager, SNIPPET_TEMPLATES } from './snippets.js';
@@ -17,6 +17,7 @@ import FullscreenConversation from './components/fullscreen-conversation.jsx';
 import { ToolDetailPanel } from './components/tool-detail-view.jsx';
 import { safeSuspend, getPlatformName } from './utils/platform.js';
 import { useSmartThrottledState } from './hooks/use-throttled-state.js';
+import { executeSlashCommand } from './commands/slash-commands.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -1001,36 +1002,16 @@ Type your message or command to get started.`
         setActivity(null);
         break;
 
-      case '/keys':
-        setMessages(prev => [...prev, {
-          role: 'system',
-          content: `快捷键参考：
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🖥️  模式切换
-  Ctrl+G    切换全屏模式
-  Ctrl+T    切换工具详情/工具显示
-  Tab       开关 Thinking 显示
-
-📝 输入控制
-  Enter     发送消息
-  Ctrl+Enter 多行模式下换行
-  Ctrl+O    切换多行输入模式
-
-🔄 滚动控制
-  Alt+↑/↓   精确滚动一行
-  PageUp/Down 快速滚动
-  Shift+↑/↓ 滚动 Thinking 或切换工具
-
-⚡ 任务控制
-  Ctrl+C    单击中止任务 / 双击退出
-  Ctrl+Z    挂起程序（Linux/Mac）
-
-❓ 帮助
-  /help     显示所有命令
-  /keys     显示本快捷键参考
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
-        }]);
+      case '/keys': {
+        const result = executeSlashCommand(input, { markdown: true });
+        if (result && result.success) {
+          setMessages(prev => [...prev, {
+            role: 'system',
+            content: result.content
+          }]);
+        }
         break;
+      }
 
       case '/help':
         setMessages(prev => [...prev, {
@@ -1048,61 +1029,18 @@ Type your message or command to get started.`
         }]);
         break;
 
-      case '/config':
+      case '/config': {
         setActivity('⚙️ 加载配置信息...');
-        const configPaths = getConfigPaths();
-        const currentConfig = getConfig();
-        
-        // 格式化配置信息
-        const providerNames = {
-          anthropic: 'Anthropic Claude',
-          openai: 'OpenAI GPT',
-          deepseek: 'DeepSeek',
-          ollama: 'Ollama (本地)'
-        };
-        
-        const provider = currentConfig.ai?.provider || 'anthropic';
-        const providerConfig = currentConfig.ai?.[provider] || {};
-        
-        const configInfo = {
-          role: 'system',
-          content: `当前配置
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🤖 AI 配置
-  提供商: ${providerNames[provider] || provider}
-  模型: ${providerConfig.model || '默认'}
-  Token 限制: ${providerConfig.maxTokens || 4096}
-  API Key: ${providerConfig.apiKey ? '已设置' : '未设置'}
-
-📁 行为配置
-  工作目录: ${currentConfig.behavior?.workingDir || process.cwd()}
-  自动计划: ${currentConfig.behavior?.autoPlan ? '开启' : '关闭'}
-  自动执行: ${currentConfig.behavior?.autoExecute ? '开启' : '关闭'}
-  最大重试: ${currentConfig.behavior?.maxRetries || 3}
-  超时时间: ${currentConfig.behavior?.timeout || 30000}ms
-
-🔧 工具配置
-  启用工具: ${currentConfig.tools?.enabled?.length || 0} 个
-
-🖥️ UI 配置
-  主题: ${currentConfig.ui?.theme || 'default'}
-  显示行号: ${currentConfig.ui?.showLineNumbers ? '开启' : '关闭'}
-  最大输出行: ${currentConfig.ui?.maxOutputLines || 100}
-
-📁 配置文件
-  全局配置: ${configPaths.global}
-  项目配置: ${configPaths.project || '未找到'}
-  当前使用: ${configPaths.active}
-
-🔧 操作提示
-  • 使用 \`cloco config\` 命令管理配置
-  • 使用 \`cloco setup\` 重新运行配置向导
-  • 使用环境变量存储敏感信息更安全
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
-        };
-        setMessages(prev => [...prev, configInfo]);
+        const result = executeSlashCommand(input, { markdown: true });
+        if (result && result.success) {
+          setMessages(prev => [...prev, {
+            role: 'system',
+            content: result.content
+          }]);
+        }
         setActivity(null);
         break;
+      }
 
       case '/history':
         setActivity('📊 获取历史记录统计...');

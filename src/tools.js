@@ -1183,15 +1183,33 @@ const TOOLS_MAP = {
   listFiles: listFilesTool
 };
 
+// 动态技能工具（运行时添加）
+let skillTools = [];
+
+/**
+ * 设置技能工具
+ * @param {Array} tools - 技能工具数组
+ */
+export function setSkillTools(tools) {
+  skillTools = tools;
+}
+
 /**
  * 获取启用工具的数组（用于 toolRunner）
  * @param {Array<string>} enabledTools - 启用的工具名称数组
  * @returns {Array} betaZodTool 对象数组
  */
 export function getToolDefinitions(enabledTools) {
-  return enabledTools
+  const tools = enabledTools
     .map(toolName => TOOLS_MAP[toolName])
     .filter(tool => tool !== undefined);
+
+  // 添加技能工具（如果启用）
+  if (enabledTools.includes('skillDiscover') && enabledTools.includes('skillLoad')) {
+    tools.push(...skillTools);
+  }
+
+  return tools;
 }
 
 /**
