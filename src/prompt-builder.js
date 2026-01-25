@@ -234,6 +234,32 @@ When a tool returns an error:
 - 遵循代码规范
 - 保持代码简洁
 
+**⚡ 并发调用原则（CRITICAL）**:
+**IMPORTANT**: 如果你打算调用多个工具且调用之间没有依赖关系，必须在同一个 function_calls 块中进行所有独立的调用。
+
+**示例**:
+\\\`\\\`\\\`javascript
+// ✅ 正确：并发调用（一次请求，多个工具并行执行）
+{
+  "tool_use_1": { "name": "readFile", "parameters": {"filePath": "a.js"} },
+  "tool_use_2": { "name": "searchFiles", "parameters": {"pattern": "*.js"} },
+  "tool_use_3": { "name": "bash", "parameters": {"command": "ls"} }
+}
+// 3个工具同时执行，总耗时 = max(单个工具耗时)
+
+// ❌ 错误：顺序调用（多次请求，工具串行执行）
+{
+  "tool_use_1": { "name": "readFile", "parameters": {"filePath": "a.js"} }
+}
+// 等待响应...
+{
+  "tool_use_2": { "name": "searchFiles", "parameters": {"pattern": "*.js"} }
+}
+// 总耗时 = sum(所有工具耗时)
+\\\`\\\`\\\`
+
+**收益**: 响应速度提升 2-3 倍
+
 ### 步骤 3: 验证解决方案
 如果可能，用测试验证：
 - 不要假设特定的测试框架
