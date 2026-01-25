@@ -573,12 +573,29 @@ export const editFileTool = betaZodTool({
   name: 'editFile',
   description: `Edit a file by replacing exact string matches.
 
+**✅ Recommended for simple replacements (prioritize this over regionConstrainedEdit)**
+
+**When to use:**
+- Simple text replacements throughout a file
+- Replacing variable names, function names, etc.
+- Quick edits where exact text is known
+
+**Examples:**
+\\\`\\\`\\\`javascript
+// ✅ Simple replacement
+editFile({
+  filePath: "app.js",
+  oldText: "console.log('Hello');",
+  newText: "console.log('Updated');"
+})
+\\\`\\\`\\\`
+
 **✅ After editing - DO NOT verify by reading:**
 - This tool returns explicit success/failure information
 - Assume success if tool returns success
 - DO NOT call readFile to verify - this wastes tokens
 
-Use this instead of bash \`sed\` command.`,
+**Use this instead of bash \`sed\` command.**`,
   inputSchema: z.object({
     filePath: z.string().describe('Path to the file to edit'),
     oldText: z.string().describe('Exact text to replace (must be unique in the file)'),
@@ -885,12 +902,16 @@ export const searchFilesTool = betaZodTool({
   name: 'searchFiles',
   description: `Search for files by name pattern using glob.
 
+**Fast file pattern matching** that works with any codebase size.
+
 **Examples:**
 - All JS files: "**/*.js"
 - TypeScript in src: "src/**/*.ts"
 - Test files: "**/*.test.js"
+- Multiple extensions: "**/*.{js,jsx,ts,tsx}"
+- Nested pattern: "src/**/*.test.js"
 
-Use this instead of bash \`find\` command.`,
+**Use this instead of bash \`find\` command.**`,
   inputSchema: z.object({
     pattern: z.string().describe('Glob pattern (e.g., "**/*.js", "src/**/*.ts")'),
     cwd: z.string().optional().describe('Working directory (default: current directory)')
@@ -921,12 +942,16 @@ export const searchCodeTool = betaZodTool({
   name: 'searchCode',
   description: `Search for text/patterns in file contents.
 
+**Fast content search** that works with any codebase size. Supports full regex syntax.
+
 **Examples:**
 - Search for function: "function myFunc"
 - Search for imports: "import.*from"
 - Search with file type: "TODO" with fileType: "js"
+- Case insensitive: "(?i)error"
+- Word boundaries: "\\bconst\\s+\\w+"
 
-Use this instead of bash \`grep\` command.`,
+**Use this instead of bash \`grep\` command.**`,
   inputSchema: z.object({
     pattern: z.string().describe('Regex pattern to search for'),
     path: z.string().optional().describe('Directory to search in (default: current directory)'),
@@ -959,12 +984,15 @@ export const listFilesTool = betaZodTool({
   name: 'listFiles',
   description: `List files and directories in a path.
 
+**Returns structured JSON output** (easier to parse than bash \`ls\`).
+
 **Examples:**
 - Current directory: {}
 - Subdirectory: {dirPath: "src"}
 - Recursively: {dirPath: "src", recursive: true}
+- Show hidden: {showHidden: true}
 
-Use this instead of bash \`ls\` command for structured output.`,
+**Use this instead of bash \`ls\` command for structured output.**`,
   inputSchema: z.object({
     dirPath: z.string().optional().describe('Directory path (default: current directory)'),
     recursive: z.boolean().optional().describe('List recursively (default: false)'),
