@@ -643,6 +643,7 @@ export const regionConstrainedEditTool = betaZodTool({
 - Replace text in a specific function
 - Modify configuration sections
 - Edit code blocks without affecting other parts
+- **Batch edits**: Apply multiple edits in one call (recommended for efficiency)
 
 **Line numbers:** 1-based, negative numbers count from end (-1 = last line)
 
@@ -658,6 +659,7 @@ export const regionConstrainedEditTool = betaZodTool({
 - Lines 10-20: {begin: 10, end: 20}
 - Last 10 lines: {begin: -10}
 - With regex: {isRegex: true}
+- **Batch edits**: {edits: [{begin: 10, oldText: "...", newText: "..."}, {begin: 20, oldText: "...", newText: "..."}]}
 
 **✅ After editing - DO NOT verify by reading:**
 - This tool returns explicit success/failure information
@@ -665,12 +667,22 @@ export const regionConstrainedEditTool = betaZodTool({
 - DO NOT call readFile to verify - this wastes tokens`,
   inputSchema: z.object({
     filePath: z.string().describe('File path'),
-    begin: z.number().describe('Start line (1-based, negative for from end)'),
+    // Single edit parameters (backward compatible)
+    begin: z.number().optional().describe('Start line (1-based, negative for from end)'),
     end: z.number().optional().describe('End line (exclusive, default: end of file)'),
-    oldText: z.string().describe('Text to find - MUST match exactly including whitespace'),
-    newText: z.string().describe('Replacement text'),
+    oldText: z.string().optional().describe('Text to find - MUST match exactly including whitespace'),
+    newText: z.string().optional().describe('Replacement text'),
     isRegex: z.boolean().optional().describe('Treat oldText as regex pattern (more flexible)'),
-    replaceAll: z.boolean().optional().describe('Replace all occurrences in region')
+    replaceAll: z.boolean().optional().describe('Replace all occurrences in region'),
+    // Batch edit parameters
+    edits: z.array(z.object({
+      begin: z.number().describe('Start line (1-based, negative for from end)'),
+      end: z.number().optional().describe('End line (exclusive, default: end of file)'),
+      oldText: z.string().describe('Text to find - MUST match exactly including whitespace'),
+      newText: z.string().describe('Replacement text'),
+      isRegex: z.boolean().optional().describe('Treat oldText as regex pattern (more flexible)'),
+      replaceAll: z.boolean().optional().describe('Replace all occurrences in region')
+    })).optional().describe('Multiple edits to apply in sequence (order matters!)')
   }),
   run: async (input) => {
     if (!toolExecutorContext) {
@@ -678,6 +690,186 @@ export const regionConstrainedEditTool = betaZodTool({
     }
 
     const fullPath = path.resolve(toolExecutorContext.workingDir, input.filePath);
+
+    // 批量编辑模式
+    if (input.edits && input.edits.length > 0) {
+      const results = [];
+      let currentContent = await fs.readFile(fullPath, 'utf-8');
+
+      for (let i = 0; i < input.edits.length; i++) {
+        const edit = input.edits[i];
+        
+        // 每次编辑都使用当前内容
+        const lines = currentContent.split('\n');
+        const totalLines = lines.length;
+
+        // 计算实际行号（处理负数）
+        const startLine = edit.begin < 0
+          ? totalLines + edit.begin + 1
+          : edit.begin;
+        const endLine = edit.end === undefined
+          ? totalLines
+          : (edit.end < 0 ? totalLines + edit.end + 1 : edit.end);
+
+        // 验证行号
+        if (startLine < 1 || startLine > totalLines) {
+          results.push({
+            success: false,
+            editIndex: i,
+            error: `Invalid start line: ${startLine}. File has ${totalLines} lines.`
+          });
+          continue;
+        }
+
+        if (endLine < startLine || endLine > totalLines) {
+          results.push({
+            success: false,
+            editIndex: i,
+            error: `Invalid end line: ${endLine}. Must be between ${startLine} and ${totalLines}.`
+          });
+          continue;
+        }
+
+        // 提取区域内容（转换为 0-based）
+        const beforeRegion = lines.slice(0, startLine - 1).join('\n');
+        const regionLines = lines.slice(startLine - 1, endLine - 1);
+        const afterRegion = lines.slice(endLine - 1).join('\n');
+        let regionContent = regionLines.join('\n');
+
+        // 保存替换前内容（用于预览）
+        const beforePreview = regionContent.substring(0, 200);
+
+        // 在区域内执行替换
+        let replacements = 0;
+        if (edit.isRegex) {
+          const flags = edit.replaceAll ? 'g' : '';
+          try {
+            const regex = new RegExp(edit.oldText, flags);
+            const matches = regionContent.match(regex);
+            replacements = matches ? matches.length : 0;
+            regionContent = regionContent.replace(regex, edit.newText);
+          } catch (error) {
+            results.push({
+              success: false,
+              editIndex: i,
+              error: `Invalid regex: ${error.message}`
+            });
+            continue;
+          }
+        } else {
+          if (edit.replaceAll) {
+            const parts = regionContent.split(edit.oldText);
+            replacements = parts.length - 1;
+            regionContent = parts.join(edit.newText);
+          } else {
+            if (!regionContent.includes(edit.oldText)) {
+              // 尝试提供更详细的错误信息
+              const errorDetail = {
+                success: false,
+                editIndex: i,
+                error: 'Text not found in region',
+                region: { begin: startLine, end: endLine },
+                hint: 'Check if the text exists in the specified line range.'
+              };
+              
+              // 尝试找到相似的文本
+              const oldTextTrimmed = edit.oldText.trim();
+              const oldTextLower = oldTextTrimmed.toLowerCase();
+              const regionLines = regionContent.split('\n');
+              let similarTexts = [];
+              
+              // 寻找包含 trimmed 文本的行
+              for (let j = 0; j < regionLines.length; j++) {
+                const line = regionLines[j];
+                const lineTrimmed = line.trim();
+                const lineLower = line.toLowerCase();
+                
+                // 检查是否包含 trimmed 版本的文本
+                if (lineLower.includes(oldTextLower) || oldTextLower.includes(lineTrimmed.toLowerCase())) {
+                  // 检查空格差异
+                  const hasLeadingSpaceDiff = line.startsWith(' ') !== edit.oldText.startsWith(' ');
+                  const hasTrailingSpaceDiff = line.endsWith(' ') !== edit.oldText.endsWith(' ');
+                  const hasTabDiff = line.includes('\t') || edit.oldText.includes('\t');
+                  
+                  similarTexts.push({
+                    line: startLine + j,
+                    content: line.substring(0, 100) + (line.length > 100 ? '...' : ''),
+                    differences: {
+                      leadingSpace: hasLeadingSpaceDiff,
+                      trailingSpace: hasTrailingSpaceDiff,
+                      tabs: hasTabDiff
+                    }
+                  });
+                }
+              }
+              
+              if (similarTexts.length > 0) {
+                errorDetail.similarTexts = similarTexts;
+                errorDetail.suggestion = 'Found similar text(s) in the region. Check for whitespace differences (spaces vs tabs, trailing spaces).';
+              }
+              
+              // 显示预期文本的前50个字符
+              errorDetail.expectedText = edit.oldText.substring(0, 50) + (edit.oldText.length > 50 ? '...' : '');
+              errorDetail.expectedLength = edit.oldText.length;
+              
+              // 显示区域内容的前200个字符
+              errorDetail.regionPreview = regionContent.substring(0, 200) + (regionContent.length > 200 ? '...' : '');
+              errorDetail.regionLength = regionContent.length;
+              
+              errorDetail.troubleshooting = [
+                '1. Check for trailing/leading whitespace differences',
+                '2. Check for tabs vs spaces',
+                '3. Consider using isRegex: true for more flexible matching',
+                '4. Use editFile tool instead for simple replacements',
+                '5. Read the file first to see the exact content'
+              ];
+              
+              results.push(errorDetail);
+              continue;
+            }
+            replacements = 1;
+            regionContent = regionContent.replace(edit.oldText, edit.newText);
+          }
+        }
+
+        // 重组文件内容（修复：过滤空字符串，避免额外的换行符）
+        const parts = [beforeRegion, regionContent, afterRegion].filter(part => part !== '');
+        currentContent = parts.join('\n');
+
+        // 生成预览（替换后）
+        const afterPreview = regionContent.substring(0, 200);
+
+        results.push({
+          success: true,
+          editIndex: i,
+          region: {
+            begin: startLine,
+            end: endLine,
+            lines: endLine - startLine + 1
+          },
+          replacements,
+          preview: {
+            before: beforePreview + (beforePreview.length >= 200 ? '...' : ''),
+            after: afterPreview + (afterPreview.length >= 200 ? '...' : '')
+          }
+        });
+      }
+
+      // 写入最终文件内容
+      await fs.writeFile(fullPath, currentContent, 'utf-8');
+
+      // 返回批量编辑结果
+      return JSON.stringify({
+        success: true,
+        filePath: fullPath,
+        totalEdits: input.edits.length,
+        successfulEdits: results.filter(r => r.success).length,
+        failedEdits: results.filter(r => !r.success).length,
+        results
+      });
+    }
+
+    // 单次编辑模式（向后兼容）
     const content = await fs.readFile(fullPath, 'utf-8');
 
     // 分割为行数组
