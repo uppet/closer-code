@@ -96,27 +96,53 @@ export class ConversationState {
  * 构建包含技能的 System Prompt
  * @param {string} basePrompt - 基础 System Prompt
  * @param {Array} activeSkills - 已加载的技能列表
+ * @param {Object} options - 配置选项
  * @returns {string} 更新后的 System Prompt
  */
-export function buildSystemPromptWithSkills(basePrompt, activeSkills) {
+export function buildSystemPromptWithSkills(basePrompt, activeSkills, options = {}) {
   if (!activeSkills || activeSkills.length === 0) {
     return basePrompt;
   }
 
+  const {
+    maxTokens = 8000,  // 最大 token 限制
+    maxSkillContentLength = 2000,  // 单个技能内容最大长度
+    includeFullContent = true  // 是否包含完整内容
+  } = options;
+
   let prompt = basePrompt;
+  let estimatedTokens = prompt.length / 2;  // 粗略估计
 
   // 添加技能部分
   prompt += '\n\n## 🎯 Loaded Skills\n\n';
   prompt += 'The following skills are available for use in this conversation:\n\n';
 
   for (const skill of activeSkills) {
-    prompt += `### ${skill.name}\n\n`;
-    prompt += `${skill.description}\n\n`;
-    prompt += `${skill.content}\n\n`;
-    prompt += '---\n\n';
+    const skillSection = `### ${skill.name}\n\n${skill.description}\n\n`;
+
+    if (includeFullContent) {
+      // 截断过长的内容
+      const content = skill.content.length > maxSkillContentLength
+        ? skill.content.substring(0, maxSkillContentLength) + '...\n\n[Content truncated due to length]'
+        : skill.content;
+
+      prompt += skillSection + content + '\n\n---\n\n';
+    } else {
+      // 只包含名称和描述
+      prompt += skillSection + '---\n\n';
+    }
+
+    // 检查 token 限制
+    estimatedTokens = prompt.length / 2;
+    if (estimatedTokens > maxTokens) {
+      console.warn('[Skills] System prompt exceeds token limit, truncating...');
+      // 移除最后添加的技能
+      prompt = prompt.substring(0, prompt.lastIndexOf('###'));
+      break;
+    }
   }
 
-  prompt += 'You can use these skills to help the user. Please carefully read the skill documentation, understand their capabilities and usage, then assist the user with their tasks.\n';
+  prompt += 'You can use these skills to help the user. Please carefully read the skill documentation, understand their capabilities and usage, then assist the user with your tasks.\n';
 
   return prompt;
 }

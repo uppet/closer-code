@@ -17,6 +17,14 @@ import path from 'path';
  */
 export async function parseSkill(skillPath) {
   try {
+    // 检查文件大小
+    const stats = await fs.stat(skillPath);
+    const MAX_SKILL_SIZE = 100 * 1024; // 100KB
+
+    if (stats.size > MAX_SKILL_SIZE) {
+      throw new Error(`Skill file too large: ${stats.size} bytes (max: ${MAX_SKILL_SIZE})`);
+    }
+
     // 读取文件内容
     const content = await fs.readFile(skillPath, 'utf-8');
 
@@ -64,28 +72,59 @@ function extractFrontmatter(content) {
   }
 
   try {
-    // 简单解析：只提取 name 和 description
     const yaml = match[1];
-    const lines = yaml.split('\n');
     const result = {};
+    const lines = yaml.split('\n');
+    let i = 0;
 
-    for (const line of lines) {
-      // 跳过空行和注释
+    while (i < lines.length) {
+      const line = lines[i];
       const trimmed = line.trim();
+
+      // 跳过空行和注释
       if (!trimmed || trimmed.startsWith('#')) {
+        i++;
         continue;
       }
 
-      // 匹配 key: value 格式（支持带引号和不带引号）
-      const match = line.match(/^(\w+):\s*(.+)$/);
-      if (match) {
-        const [, key, value] = match;
-        // 移除引号（单引或双引）
-        result[key] = value
-          .replace(/^"|"$/g, '')
-          .replace(/^'|'$/g, '')
-          .trim();
+      // 查找冒号位置
+      const colonIndex = line.indexOf(':');
+      if (colonIndex === -1) {
+        i++; // 跳过无效行
+        continue;
       }
+
+      const key = line.substring(0, colonIndex).trim();
+      let value = line.substring(colonIndex + 1).trim();
+
+      // 处理多行值（以空格或缩进开头）
+      if (value === '' && i + 1 < lines.length) {
+        const nextLine = lines[i + 1];
+        if (nextLine.startsWith(' ') || nextLine.startsWith('\t')) {
+          // 多行值
+          const multiLines = [];
+          i++;
+          while (i < lines.length) {
+            const l = lines[i];
+            if (l.trim() === '' || l.startsWith(' ') || l.startsWith('\t')) {
+              multiLines.push(l.trim());
+              i++;
+            } else {
+              break;
+            }
+          }
+          value = multiLines.join(' ');
+        }
+      }
+
+      // 处理引号
+      if ((value.startsWith('"') && value.endsWith('"')) ||
+          (value.startsWith("'") && value.endsWith("'"))) {
+        value = value.slice(1, -1);
+      }
+
+      result[key] = value;
+      i++;
     }
 
     return result;
