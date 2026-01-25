@@ -47,7 +47,7 @@ async function readProjectCloco() {
 /**
  * 构建系统提示词（优化后的版本）
  */
-export async function getSystemPrompt(config, workflowTest = false) {
+export async function getSystemPrompt(config, workflowTest = false, activeSkills = null) {
   const memory = loadMemory();
   const projectKey = config.behavior.workingDir || 'default';
   const projectInfo = memory.projects?.[projectKey];
@@ -64,7 +64,7 @@ export async function getSystemPrompt(config, workflowTest = false) {
   }
 
   // 构建完整的系统提示词
-  const prompt = `You are Closer, an AI programming assistant designed to help developers with coding tasks, debugging, and project management.
+  let prompt = `You are Closer, an AI programming assistant designed to help developers with coding tasks, debugging, and project management.
 
 ## 🛠️ Tool Usage (CRITICAL - Read Carefully)
 
@@ -209,6 +209,31 @@ No custom behavior guidelines found. You can add them by:
 - Creating ~/.closer-code/cloco.md for global guidelines
 - Creating ./cloco.md for project-specific guidelines
 ` : ''}${workflowPrompt}`;
+
+  // 添加已加载的技能
+  if (activeSkills && activeSkills.length > 0) {
+    prompt += `
+
+## 🎯 Loaded Skills
+
+The following skills are available for use in this conversation:
+
+`;
+
+    for (const skill of activeSkills) {
+      prompt += `### ${skill.name}
+
+${skill.description}
+
+${skill.content}
+
+---
+`;
+    }
+
+    prompt += `You can use these skills to help the user. Please carefully read the skill documentation, understand their capabilities and usage, then assist the user with their tasks.
+`;
+  }
 
   return prompt;
 }

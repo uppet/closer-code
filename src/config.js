@@ -75,6 +75,19 @@ const DEFAULT_CONFIG = {
     ]
   },
 
+  // Skills 配置
+  skills: {
+    enabled: true,              // 是否启用技能系统
+    directories: {
+      global: '~/.closer-code/skills',      // 全局技能目录
+      project: '.closer-code/skills'        // 项目本地技能目录
+    },
+    resident: [                 // 常驻技能列表（始终加载）
+      // 'git-status',
+      // 'file-read'
+    ]
+  },
+
   // UI 配置
   ui: {
     theme: 'default',

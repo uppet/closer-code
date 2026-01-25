@@ -251,6 +251,26 @@ async function runBatch() {
       process.exit(2);
     }
 
+    // 检查是否为斜杠命令
+    if (prompt.trim().startsWith('/')) {
+      formatter.progress('检测到斜杠命令...');
+      
+      const { executeSlashCommand } = await import('./commands/slash-commands.js');
+      const result = executeSlashCommand(prompt, { markdown: false });
+      
+      if (result) {
+        // 是斜杠命令，输出结果并退出
+        if (result.success) {
+          console.log(result.content);
+          process.exit(0);
+        } else {
+          console.error(formatter.error(result.error || '命令执行失败'));
+          process.exit(1);
+        }
+      }
+      // 不是已知的斜杠命令，继续作为普通提示词处理
+    }
+
     formatter.progress('初始化配置...');
     const config = getConfig();
 
