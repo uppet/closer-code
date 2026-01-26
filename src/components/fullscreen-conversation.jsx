@@ -125,7 +125,7 @@ const FullscreenConversation = React.memo(function FullscreenConversation({ mess
                       {isUser ? '👤 用户' : isError ? '❌ 错误' : isSystem ? 'ℹ️ 系统' : '🤖 助手'}
                     </Text>
                   </Box>
-                  <Box width="100%">
+                  <Box width="100%" paddingLeft={1}>
                     <Text color={color}>
                       {typeof message.content === 'string'
                         ? message.content

@@ -216,7 +216,8 @@ function formatMessageAsLines(message, maxWidth = 80) {
 
   const lines = [];
   const prefixLength = 4; // emoji + space
-  const contentWidth = maxWidth - prefixLength - 2; // 留出边距
+  const contentWidth = maxWidth - prefixLength - 4; // 留出更多边距
+  const contentIndent = '    '; // 4个空格缩进，确保内容不被遮挡
 
   // 添加前缀行
   lines.push({
@@ -235,14 +236,14 @@ function formatMessageAsLines(message, maxWidth = 80) {
       for (let i = 0; i < line.length; i += contentWidth) {
         const chunk = line.slice(i, i + contentWidth);
         lines.push({
-          text: '  ' + chunk, // 缩进
+          text: contentIndent + chunk, // 使用4个空格缩进
           color: color,
           type: 'content'
         });
       }
     } else {
       lines.push({
-        text: '  ' + (line || ''), // 缩进，空行也显示
+        text: contentIndent + (line || ''), // 使用4个空格缩进，空行也显示
         color: color,
         type: 'content'
       });
