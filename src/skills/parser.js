@@ -17,6 +17,13 @@ import path from 'path';
  */
 export async function parseSkill(skillPath) {
   try {
+    // 检查文件是否存在
+    try {
+      await fs.access(skillPath, fs.constants.R_OK);
+    } catch (accessError) {
+      throw new Error(`Skill file not accessible: ${skillPath} (${accessError.code})`);
+    }
+
     // 检查文件大小
     const stats = await fs.stat(skillPath);
     const MAX_SKILL_SIZE = 100 * 1024; // 100KB

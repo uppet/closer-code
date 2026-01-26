@@ -265,6 +265,30 @@ export class SkillRegistry {
         const skillInfo = skills.find(s => s.name === name);
 
         if (!skillInfo) {
+          console.warn(`[Skills] Skill "${name}" not found in registry`);
+          return null;
+        }
+
+        skillPath = skillInfo.path;
+        this.skillPathCache.set(name, skillPath);
+      }
+
+      // 验证路径缓存是否仍然有效（文件是否存在）
+      try {
+        await fs.access(skillPath);
+      } catch (error) {
+        // 文件不存在，清除缓存并重新扫描
+        console.warn(`[Skills] Cached path invalid for "${name}": ${skillPath}, re-scanning...`);
+        this.skillPathCache.delete(name);
+
+        // 清除发现缓存，强制重新扫描文件系统
+        this.discoveryCache.clear();
+
+        const skills = await this.discover();
+        const skillInfo = skills.find(s => s.name === name);
+
+        if (!skillInfo) {
+          console.warn(`[Skills] Skill "${name}" not found after re-scan`);
           return null;
         }
 
@@ -281,6 +305,9 @@ export class SkillRegistry {
       return skill;
     } catch (error) {
       console.error(`[Skills] Failed to load skill "${name}":`, error.message);
+      // 清除可能损坏的缓存
+      this.skillPathCache.delete(name);
+      this.skillCache.delete(name);
       return null;
     }
   }
