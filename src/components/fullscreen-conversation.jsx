@@ -58,10 +58,10 @@ const FullscreenConversation = React.memo(function FullscreenConversation({ mess
     return 'red';
   };
 
-  // 将消息和工具执行按时间顺序混合
+  // 将消息和工具执行按顺序混合
   const getMixedContent = () => {
     const content = [];
-    let toolIndex = 0; // 工具执行的当前索引
+    const usedToolIndices = new Set(); // 记录已使用的工具索引
 
     // 遍历消息，将工具执行插入到对应的助手消息后面
     messages.forEach((message, msgIndex) => {
@@ -74,56 +74,35 @@ const FullscreenConversation = React.memo(function FullscreenConversation({ mess
       });
 
       // 如果是助手消息且有工具调用，添加相关的工具执行
-      if (message.role === 'assistant' && message.complete && showTools) {
-        // 获取这条消息之后的工具执行
-        // 通过时间戳或序号判断哪些工具属于这条消息
-        const messageTime = message.key || Date.now();
-        const nextMessage = messages[msgIndex + 1];
-        const nextMessageTime = nextMessage?.key || Infinity;
-
-        // 找到所有在当前消息之后、下条消息之前完成的工具
-        while (toolIndex < toolExecutions.length) {
-          const tool = toolExecutions[toolIndex];
-          // 计算工具完成时间：startTime + duration，或者使用 id（开始时间戳）
-          const toolTime = (tool.startTime && tool.duration)
-            ? tool.startTime + tool.duration
-            : tool.id || Date.now();
-
-          // 如果工具完成时间在当前消息时间之后，且在下一条消息之前，则添加
-          if (toolTime >= messageTime && toolTime < nextMessageTime) {
+      if (message.role === 'assistant' && showTools) {
+        // 找到所有属于这条消息的工具（通过 messageIndex 匹配）
+        toolExecutions.forEach((tool, toolIdx) => {
+          // 如果工具的 messageIndex 等于当前消息索引，且未被使用过
+          if (tool.messageIndex === msgIndex && !usedToolIndices.has(toolIdx)) {
             content.push({
               type: 'tool',
               data: tool,
-              key: tool.id || `tool-${toolIndex}`,
-              timestamp: toolTime
+              key: tool.id || `tool-${toolIdx}`,
+              timestamp: tool.startTime || tool.id || Date.now()
             });
-            toolIndex++;
-          } else if (toolTime < messageTime) {
-            // 工具时间早于当前消息，跳过并继续
-            toolIndex++;
-          } else {
-            // 工具时间晚于当前消息时间窗口，停止处理
-            break;
+            usedToolIndices.add(toolIdx);
           }
-        }
+        });
       }
     });
 
-    // 添加剩余的工具执行（如果有）
-    if (showTools && toolIndex < toolExecutions.length) {
-      while (toolIndex < toolExecutions.length) {
-        const tool = toolExecutions[toolIndex];
-        const toolTime = (tool.startTime && tool.duration)
-          ? tool.startTime + tool.duration
-          : tool.id || Date.now();
-        content.push({
-          type: 'tool',
-          data: tool,
-          key: tool.id || `tool-${toolIndex}`,
-          timestamp: toolTime
-        });
-        toolIndex++;
-      }
+    // 添加剩余的工具执行（没有关联到任何消息的工具）
+    if (showTools) {
+      toolExecutions.forEach((tool, toolIdx) => {
+        if (!usedToolIndices.has(toolIdx)) {
+          content.push({
+            type: 'tool',
+            data: tool,
+            key: tool.id || `tool-${toolIdx}`,
+            timestamp: tool.startTime || tool.id || Date.now()
+          });
+        }
+      });
     }
 
     return content;

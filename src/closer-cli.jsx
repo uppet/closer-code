@@ -299,6 +299,7 @@ function App() {
   const [thinkingScrollPosition, setThinkingScrollPosition] = useState(0); // Thinking滚动位置
   const [showToolDetail, setShowToolDetail] = useState(false); // 工具详情面板开关
   const [toolDetailIndex, setToolDetailIndex] = useState(0); // 工具详情面板选中索引
+  const [currentAssistantMessageIndex, setCurrentAssistantMessageIndex] = useState(-1); // 当前正在生成的助手消息索引
 
   // 节流更新 Hook
   const activityUpdate = useSmartThrottledState(setActivity, {
@@ -804,6 +805,11 @@ Type your message or command to get started.`
             thinkingUpdate.updateSmart(prev => [...prev, thinkingMsg], 'tool_start');
             // 存储工具信息，包括 input 和 result 引用（用于生成摘要）
             toolExecutionsUpdate.updateSmart(prev => {
+              // 获取当前消息数组中最后一条助手消息的索引
+              // 工具是在消息生成过程中调用的，所以应该关联到最后一条助手消息
+              const currentMessages = messages; // 使用闭包捕获的当前 messages
+              const lastAssistantMsgIndex = currentMessages.findLastIndex(m => m.role === 'assistant');
+
               const newExecs = [...prev, {
                 id: Date.now(),
                 tool: progress.tool,
@@ -812,7 +818,8 @@ Type your message or command to get started.`
                 result: null,
                 status: 'running',
                 startTime: Date.now(),
-                duration: null
+                duration: null,
+                messageIndex: lastAssistantMsgIndex >= 0 ? lastAssistantMsgIndex : null // 记录所属消息的索引
               }];
               // 只保留最近 10 个
               const sliced = newExecs.slice(-10);
