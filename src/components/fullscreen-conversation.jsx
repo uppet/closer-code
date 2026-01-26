@@ -61,32 +61,71 @@ const FullscreenConversation = React.memo(function FullscreenConversation({ mess
   // 将消息和工具执行按时间顺序混合
   const getMixedContent = () => {
     const content = [];
+    let toolIndex = 0; // 工具执行的当前索引
 
-    // 添加消息
-    messages.forEach((message, index) => {
+    // 遍历消息，将工具执行插入到对应的助手消息后面
+    messages.forEach((message, msgIndex) => {
+      // 添加消息
       content.push({
         type: 'message',
         data: message,
-        key: message.key || `msg-${index}`,
-        timestamp: message.timestamp || index
+        key: message.key || `msg-${msgIndex}`,
+        timestamp: message.timestamp || msgIndex
       });
+
+      // 如果是助手消息且有工具调用，添加相关的工具执行
+      if (message.role === 'assistant' && message.complete && showTools) {
+        // 获取这条消息之后的工具执行
+        // 通过时间戳或序号判断哪些工具属于这条消息
+        const messageTime = message.key || Date.now();
+        const nextMessage = messages[msgIndex + 1];
+        const nextMessageTime = nextMessage?.key || Infinity;
+
+        // 找到所有在当前消息之后、下条消息之前完成的工具
+        while (toolIndex < toolExecutions.length) {
+          const tool = toolExecutions[toolIndex];
+          // 计算工具完成时间：startTime + duration，或者使用 id（开始时间戳）
+          const toolTime = (tool.startTime && tool.duration)
+            ? tool.startTime + tool.duration
+            : tool.id || Date.now();
+
+          // 如果工具完成时间在当前消息时间之后，且在下一条消息之前，则添加
+          if (toolTime >= messageTime && toolTime < nextMessageTime) {
+            content.push({
+              type: 'tool',
+              data: tool,
+              key: tool.id || `tool-${toolIndex}`,
+              timestamp: toolTime
+            });
+            toolIndex++;
+          } else if (toolTime < messageTime) {
+            // 工具时间早于当前消息，跳过并继续
+            toolIndex++;
+          } else {
+            // 工具时间晚于当前消息时间窗口，停止处理
+            break;
+          }
+        }
+      }
     });
 
-    // 添加工具执行（仅在 showTools 为 true 时）
-    if (showTools) {
-      toolExecutions.forEach((tool, index) => {
+    // 添加剩余的工具执行（如果有）
+    if (showTools && toolIndex < toolExecutions.length) {
+      while (toolIndex < toolExecutions.length) {
+        const tool = toolExecutions[toolIndex];
+        const toolTime = (tool.startTime && tool.duration)
+          ? tool.startTime + tool.duration
+          : tool.id || Date.now();
         content.push({
           type: 'tool',
           data: tool,
-          key: tool.id || `tool-${index}`,
-          timestamp: tool.id || Date.now() + index
+          key: tool.id || `tool-${toolIndex}`,
+          timestamp: toolTime
         });
-      });
+        toolIndex++;
+      }
     }
 
-    // 按时间戳排序（保持原有顺序，工具执行插入到对应位置）
-    // 由于消息没有精确时间戳，我们保持消息在前，工具在后的顺序
-    // 实际上工具执行是在 AI 响应过程中发生的，所以放在消息之后
     return content;
   };
 
