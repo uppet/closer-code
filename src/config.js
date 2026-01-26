@@ -60,8 +60,10 @@ const DEFAULT_CONFIG = {
   tools: {
     enabled: [
       'bash',                    // 执行 shell 命令
+      'bashResult',              // 从缓存的 bash 结果中获取更多内容
       'readFile',                // 读取文件（智能分段）
       'readFileLines',           // 读取文件指定行范围
+      'readFileChunk',           // 按字节读取文件（适用于 minify 文件）
       'readFileTail',            // 读取文件末尾（日志文件）
       'writeFile',               // 写入文件
       'editFile',                // 编辑文件（全文替换）
