@@ -5,6 +5,8 @@
 
 import { getConfig, getConfigPaths } from '../config.js';
 import { createShortcutManager } from '../shortcuts.js';
+import path from 'path';
+import os from 'os';
 
 /**
  * 命令执行结果
@@ -198,6 +200,149 @@ Tips:
 }
 
 /**
+ * /skills 命令 - 显示技能系统状态
+ * @param {Object} options - 命令选项
+ * @param {boolean} options.markdown - 是否使用 Markdown 格式（默认 true）
+ * @param {Object} options.conversation - Conversation 实例（可选）
+ * @returns {CommandResult}
+ */
+export async function skillsCommand(options = {}) {
+  const { markdown = true, conversation = null } = options;
+
+  try {
+    const config = getConfig();
+    const skillsEnabled = config.skills?.enabled ?? false;
+
+    let content = '';
+
+    if (markdown) {
+      content = `
+🎯 技能系统状态
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 系统状态
+  技能系统: ${skillsEnabled ? '✅ 已启用' : '❌ 未启用'}
+  
+  📁 技能目录
+    全局: ${path.join(os.homedir(), '.closer-code', 'skills')}
+    项目: ${path.join(process.cwd(), '.closer-code', 'skills')}
+  
+  🔄 常驻技能: ${config.skills?.resident?.length || 0} 个
+    ${config.skills?.resident?.map(s => `    • ${s}`).join('\n') || '    无'}
+`;
+
+      if (skillsEnabled && conversation) {
+        // 从 conversation 实例获取详细信息
+        const { skillRegistry, conversationState } = conversation;
+        
+        if (skillRegistry) {
+          const stats = skillRegistry.getStats();
+          const discovered = await skillRegistry.discover();
+          
+          content += `
+📈 注册表统计
+  初始化状态: ${stats.initialized ? '✅ 已初始化' : '❌ 未初始化'}
+  缓存技能数: ${stats.cachedSkills}
+  发现缓存数: ${stats.discoveryCacheSize}
+  
+  🔍 可用技能: ${discovered.length} 个
+${discovered.map(s => `    • ${s.name}`).join('\n') || '    无'}
+`;
+        }
+        
+        if (conversationState) {
+          const activeSkills = conversationState.getActiveSkills();
+          
+          content += `
+✅ 已激活技能: ${activeSkills.length} 个
+${activeSkills.map(s => `    • ${s.name}`).join('\n') || '    无'}
+`;
+        }
+      } else if (skillsEnabled) {
+        content += `
+💡 提示
+  运行此命令时未提供 conversation 实例
+  部分信息可能不可用
+`;
+      }
+
+      content += `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💡 使用提示
+  • 使用 /plan 可以触发技能加载
+  • 技能文件格式: skill-name/skill.md
+  • 支持 Markdown 和 YAML front-matter
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+`;
+    } else {
+      // 纯文本格式
+      content = `
+Skills System Status:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+System Status:
+  Skills System: ${skillsEnabled ? 'Enabled' : 'Disabled'}
+  
+  Skill Directories:
+    Global: ${path.join(os.homedir(), '.closer-code', 'skills')}
+    Project: ${path.join(process.cwd(), '.closer-code', 'skills')}
+  
+  Resident Skills: ${config.skills?.resident?.length || 0}
+${config.skills?.resident?.map(s => `    • ${s}`).join('\n') || '    None'}
+`;
+
+      if (skillsEnabled && conversation) {
+        const { skillRegistry, conversationState } = conversation;
+        
+        if (skillRegistry) {
+          const stats = skillRegistry.getStats();
+          const discovered = await skillRegistry.discover();
+          
+          content += `
+Registry Statistics:
+  Initialized: ${stats.initialized ? 'Yes' : 'No'}
+  Cached Skills: ${stats.cachedSkills}
+  Discovery Cache: ${stats.discoveryCacheSize}
+  
+  Available Skills: ${discovered.length}
+${discovered.map(s => `    • ${s.name}`).join('\n') || '    None'}
+`;
+        }
+        
+        if (conversationState) {
+          const activeSkills = conversationState.getActiveSkills();
+          
+          content += `
+Active Skills: ${activeSkills.length}
+${activeSkills.map(s => `    • ${s.name}`).join('\n') || '    None'}
+`;
+        }
+      }
+
+      content += `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Tips:
+  • Use /plan to trigger skill loading
+  • Skill file format: skill-name/skill.md
+  • Supports Markdown and YAML front-matter
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+`;
+    }
+
+    return {
+      success: true,
+      content: content.trim()
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message,
+      content: `Error: ${error.message}`
+    };
+  }
+}
+
+/**
  * /help 命令 - 显示帮助信息
  * @param {Object} options - 命令选项
  * @param {boolean} options.markdown - 是否使用 Markdown 格式（默认 true）
@@ -218,6 +363,7 @@ export function helpCommand(options = {}) {
 ℹ️  信息命令
   /keys          显示键盘快捷键参考
   /config        显示当前配置
+  /skills        显示技能系统状态
   /help          显示本帮助信息
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -238,6 +384,7 @@ Conversation Commands:
 Information Commands:
   /keys          Show keyboard shortcuts reference
   /config        Show current configuration
+  /skills        Show skills system status
   /help          Show this help message
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -267,6 +414,11 @@ export const COMMAND_REGISTRY = {
     handler: configCommand,
     description: '显示当前配置',
     descriptionEn: 'Show current configuration'
+  },
+  '/skills': {
+    handler: skillsCommand,
+    description: '显示技能系统状态',
+    descriptionEn: 'Show skills system status'
   },
   '/help': {
     handler: helpCommand,
@@ -302,9 +454,9 @@ export function parseSlashCommand(input) {
  * 执行斜杠命令
  * @param {string} input - 用户输入
  * @param {Object} options - 命令选项
- * @returns {CommandResult|null} - 如果不是斜杠命令返回 null
+ * @returns {Promise<CommandResult|null>} - 如果不是斜杠命令返回 null
  */
-export function executeSlashCommand(input, options = {}) {
+export async function executeSlashCommand(input, options = {}) {
   if (!isSlashCommand(input)) {
     return null;
   }
@@ -321,7 +473,14 @@ export function executeSlashCommand(input, options = {}) {
   }
 
   try {
-    return commandInfo.handler(options);
+    const result = commandInfo.handler(options);
+    
+    // 如果返回的是 Promise，等待它
+    if (result && typeof result.then === 'function') {
+      return await result;
+    }
+    
+    return result;
   } catch (error) {
     return {
       success: false,

@@ -933,6 +933,22 @@ Type your message or command to get started.`
         setActivity(null);
         break;
 
+      case '/skills': {
+        setActivity('🎯 获取技能系统状态...');
+        const result = await executeSlashCommand(cmd, { 
+          markdown: true,
+          conversation: conversation 
+        });
+        if (result && result.success) {
+          setMessages(prev => [...prev, {
+            role: 'system',
+            content: result.content
+          }]);
+        }
+        setActivity(null);
+        break;
+      }
+
       case '/plan':
         if (args.length === 0) {
           setMessages(prev => [...prev, {
@@ -1003,7 +1019,7 @@ Type your message or command to get started.`
         break;
 
       case '/keys': {
-        const result = executeSlashCommand(input, { markdown: true });
+        const result = executeSlashCommand(cmd, { markdown: true });
         if (result && result.success) {
           setMessages(prev => [...prev, {
             role: 'system',
@@ -1025,13 +1041,14 @@ Type your message or command to get started.`
 /history - Show input history statistics
 /keys - Show keyboard shortcuts reference
 /config - Show current configuration
+/skills - Show skills system status
 /help - Show this help message`
         }]);
         break;
 
       case '/config': {
         setActivity('⚙️ 加载配置信息...');
-        const result = executeSlashCommand(input, { markdown: true });
+        const result = executeSlashCommand(cmd, { markdown: true });
         if (result && result.success) {
           setMessages(prev => [...prev, {
             role: 'system',
