@@ -64,9 +64,10 @@ export function createSkillDiscoverTool(skillRegistry) {
  * 创建 skillLoad 工具
  * @param {Object} skillRegistry - 技能注册表实例
  * @param {Object} conversationState - 会话状态实例
+ * @param {Object} conversation - 对话实例（用于注入技能消息）
  * @returns {Object} betaZodTool 对象
  */
-export function createSkillLoadTool(skillRegistry, conversationState) {
+export function createSkillLoadTool(skillRegistry, conversationState, conversation) {
   return betaZodTool({
     name: 'skillLoad',
     description: `加载指定的技能，使其在当前对话中可用。
@@ -77,8 +78,9 @@ export function createSkillLoadTool(skillRegistry, conversationState) {
 3. 当前工具无法完成用户需求
 
 **加载成功后**：
-- 技能的完整内容将被添加到系统上下文
-- 模型可以使用技能描述中说明的能力
+- 技能的完整内容将被注入到对话历史中
+- 模型可以在后续对话中使用技能描述的能力
+- system prompt 保持不变，优化 API 缓存
 
 **失败处理**：
 - 如果技能不存在或加载失败，使用原有能力解决问题`,
@@ -102,14 +104,19 @@ export function createSkillLoadTool(skillRegistry, conversationState) {
         // 添加到会话状态
         conversationState.addSkill(skill);
 
+        // 注入技能内容到对话历史（保持 system prompt 不变）
+        if (conversation && typeof conversation.injectSkillMessage === 'function') {
+          conversation.injectSkillMessage(skill);
+        }
+
         return JSON.stringify({
           success: true,
           skill: {
             name: skill.name,
-            description: skill.description,
-            content: skill.content
+            description: skill.description
+            // 不返回 content，因为已经注入到消息历史中
           },
-          message: `技能 "${skill.name}" 已加载。`
+          message: `技能 "${skill.name}" 已加载到对话上下文中。`
         });
       } catch (error) {
         return JSON.stringify({
@@ -126,11 +133,12 @@ export function createSkillLoadTool(skillRegistry, conversationState) {
  * 创建所有技能工具
  * @param {Object} skillRegistry - 技能注册表实例
  * @param {Object} conversationState - 会话状态实例
+ * @param {Object} conversation - 对话实例（用于消息注入）
  * @returns {Array} 工具数组
  */
-export function createSkillTools(skillRegistry, conversationState) {
+export function createSkillTools(skillRegistry, conversationState, conversation) {
   return [
     createSkillDiscoverTool(skillRegistry),
-    createSkillLoadTool(skillRegistry, conversationState)
+    createSkillLoadTool(skillRegistry, conversationState, conversation)
   ];
 }

@@ -71,7 +71,9 @@ const DEFAULT_CONFIG = {
       'listFiles',               // 列出文件
       'analyzeError',            // 分析错误
       'runTests',                // 运行测试
-      'planTask'                 // 规划任务
+      'planTask',                // 规划任务
+      'skillDiscover',           // 发现可用技能
+      'skillLoad'                // 加载技能到对话
     ]
   },
 

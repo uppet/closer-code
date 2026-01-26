@@ -60,7 +60,7 @@ async function readProjectCloco() {
  * @param {Array} activeSkills - 已加载的技能列表
  * @returns {Array} 分段式系统提示词
  */
-export async function getSystemPrompt(config, workflowTest = false, activeSkills = null) {
+export async function getSystemPrompt(config, workflowTest = false, activeSkills = null, potentialSkills = null) {
   const memory = loadMemory();
   const projectKey = config.behavior.workingDir || 'default';
   const projectInfo = memory.projects?.[projectKey];
@@ -336,6 +336,53 @@ git status  # 确保提交成功
 - 永远不要更新 git config
 - 不要推送到远程仓库
 - 不要使用 \`-i\` 标志的 git 命令（需要交互输入）`
+  });
+
+  const skillsPrompt = `## 🎯 Skills System - Enhanced Capabilities
+
+You have access to a **Skills System** that provides additional specialized capabilities:
+
+### Available Skills Tools:
+1. **skillDiscover** - Discover available skills in the system
+   - Use when: You need specialized capabilities beyond standard tools
+   - Returns: List of available skills with names and descriptions
+   - Example: skillDiscover with query "git" to find git-related skills
+
+2. **skillLoad** - Load a skill into the conversation
+   - Use when: You found a relevant skill via skillDiscover
+   - Effect: Skill content is injected into conversation history
+   - Example: skillLoad with name "git-status" to load git status skill
+
+### When to Use Skills:
+- User requests specialized functionality (Git, deployment, testing, etc.)
+- Current tools are insufficient for the task
+- You need domain-specific knowledge or workflows
+- User mentions a specific skill by name
+
+### Workflow:
+1. Use skillDiscover to find relevant skills
+2. Review skill descriptions to identify the best match
+3. Use skillLoad to load the skill into conversation
+4. Use the loaded skill's capabilities to assist the user
+
+**Note**: Loaded skills become available in the conversation context without modifying the system prompt, enabling efficient API caching.
+${potentialSkills && potentialSkills.length > 0 ? `
+
+## 📚 Available Skills (Potential)
+
+The following skills are available in this system. You can load any of them using the skillLoad tool when needed:
+
+${potentialSkills.map(skill => `- **${skill.name}**: ${skill.description}`).join('\n')}
+
+**Remember**: These skills are not yet loaded. Use skillLoad to load a skill when you need its capabilities.
+
+` : ''}
+
+`
+  systemPrompt.push({
+    type: 'text',
+    cache_control: { type: 'ephemeral' },
+    text: skillsPrompt
   });
 
   // 段落 3: 当前上下文和项目信息（动态内容，需要缓存）
