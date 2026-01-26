@@ -256,7 +256,7 @@ async function runBatch() {
       formatter.progress('检测到斜杠命令...');
       
       const { executeSlashCommand } = await import('./commands/slash-commands.js');
-      const result = executeSlashCommand(prompt, { markdown: false });
+      const result = await executeSlashCommand(prompt, { markdown: false });
       
       if (result) {
         // 是斜杠命令，输出结果并退出
