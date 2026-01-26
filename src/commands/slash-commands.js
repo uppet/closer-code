@@ -3,7 +3,7 @@
  * 提供跨交互式和批处理模式的命令实现
  */
 
-import { getConfig, getConfigPaths } from '../config.js';
+import { getConfig, getConfigPaths, clearHistory } from '../config.js';
 import { createShortcutManager } from '../shortcuts.js';
 import path from 'path';
 import os from 'os';
@@ -343,6 +343,48 @@ Tips:
 }
 
 /**
+ * /clear 命令 - 清除对话历史
+ * @param {Object} options - 命令选项
+ * @param {boolean} options.markdown - 是否使用 Markdown 格式（默认 true）
+ * @returns {CommandResult}
+ */
+export function clearCommand(options = {}) {
+  const { markdown = true } = options;
+
+  try {
+    // 清除当前项目的历史
+    clearHistory();
+
+    const content = markdown ? `
+✅ 对话历史已清除
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+当前项目的对话历史已被成功清除。
+
+下次对话将从头开始。
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+` : `
+Conversation history cleared
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+The conversation history for the current project has been successfully cleared.
+
+Next conversation will start from scratch.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+`;
+
+    return {
+      success: true,
+      content: content.trim()
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message,
+      content: `Failed to clear history: ${error.message}`
+    };
+  }
+}
+
+/**
  * /help 命令 - 显示帮助信息
  * @param {Object} options - 命令选项
  * @param {boolean} options.markdown - 是否使用 Markdown 格式（默认 true）
@@ -355,6 +397,7 @@ export function helpCommand(options = {}) {
 可用命令：
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 📝 对话命令
+  /clear         清除对话历史
   /plan <task>   创建并执行任务计划
   /learn         学习项目模式
   /status        显示对话摘要
@@ -376,6 +419,7 @@ export function helpCommand(options = {}) {
 Available Commands:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Conversation Commands:
+  /clear         Clear conversation history
   /plan <task>   Create and execute task plan
   /learn         Learn project patterns
   /status        Show conversation summary
@@ -405,6 +449,11 @@ Tips:
  * 命令注册表
  */
 export const COMMAND_REGISTRY = {
+  '/clear': {
+    handler: clearCommand,
+    description: '清除对话历史',
+    descriptionEn: 'Clear conversation history'
+  },
   '/keys': {
     handler: keysCommand,
     description: '显示键盘快捷键参考',
