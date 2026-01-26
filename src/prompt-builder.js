@@ -47,7 +47,7 @@ async function readProjectCloco() {
 /**
  * 构建系统提示词（优化后的版本）
  */
-export async function getSystemPrompt(config, workflowTest = false, activeSkills = null) {
+export async function getSystemPrompt(config, workflowTest = false, activeSkills = null, potentialSkills = null) {
   const memory = loadMemory();
   const projectKey = config.behavior.workingDir || 'default';
   const projectInfo = memory.projects?.[projectKey];
@@ -171,6 +171,46 @@ When asked to analyze or review code:
 
 **NOTE**: Only perform comprehensive analysis when explicitly requested. For specific questions, focus on the relevant parts.
 
+## 🎯 Skills System - Enhanced Capabilities
+
+You have access to a **Skills System** that provides additional specialized capabilities:
+
+### Available Skills Tools:
+1. **skillDiscover** - Discover available skills in the system
+   - Use when: You need specialized capabilities beyond standard tools
+   - Returns: List of available skills with names and descriptions
+   - Example: skillDiscover with query "git" to find git-related skills
+
+2. **skillLoad** - Load a skill into the conversation
+   - Use when: You found a relevant skill via skillDiscover
+   - Effect: Skill content is injected into conversation history
+   - Example: skillLoad with name "git-status" to load git status skill
+
+### When to Use Skills:
+- User requests specialized functionality (Git, deployment, testing, etc.)
+- Current tools are insufficient for the task
+- You need domain-specific knowledge or workflows
+- User mentions a specific skill by name
+
+### Workflow:
+1. Use skillDiscover to find relevant skills
+2. Review skill descriptions to identify the best match
+3. Use skillLoad to load the skill into conversation
+4. Use the loaded skill's capabilities to assist the user
+
+**Note**: Loaded skills become available in the conversation context without modifying the system prompt, enabling efficient API caching.
+${potentialSkills && potentialSkills.length > 0 ? `
+
+## 📚 Available Skills (Potential)
+
+The following skills are available in this system. You can load any of them using the skillLoad tool when needed:
+
+${potentialSkills.map(skill => `- **${skill.name}**: ${skill.description}`).join('\n')}
+
+**Remember**: These skills are not yet loaded. Use skillLoad to load a skill when you need its capabilities.
+
+` : ''}
+
 ## 📍 Current Context
 Working Directory: ${config.behavior.workingDir}
 Available Tools: ${config.tools.enabled.join(', ')}
@@ -210,30 +250,8 @@ No custom behavior guidelines found. You can add them by:
 - Creating ./cloco.md for project-specific guidelines
 ` : ''}${workflowPrompt}`;
 
-  // 添加已加载的技能
-  if (activeSkills && activeSkills.length > 0) {
-    prompt += `
-
-## 🎯 Loaded Skills
-
-The following skills are available for use in this conversation:
-
-`;
-
-    for (const skill of activeSkills) {
-      prompt += `### ${skill.name}
-
-${skill.description}
-
-${skill.content}
-
----
-`;
-    }
-
-    prompt += `You can use these skills to help the user. Please carefully read the skill documentation, understand their capabilities and usage, then assist the user with their tasks.
-`;
-  }
+  // 注意：已加载的技能通过对话消息注入，不再在 system prompt 中重复显示
+  // 这样可以保持 system prompt 稳定，优化 API 缓存命中率
 
   return prompt;
 }

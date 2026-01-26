@@ -97,6 +97,7 @@ export class Conversation {
     // 初始化技能系统（如果启用）
     this.skillRegistry = null;
     this.conversationState = null;
+    this.potentialSkills = []; // 潜在可用技能列表（仅包含 name 和 description）
     this.skillsEnabled = config.skills?.enabled ?? false;
   }
 
@@ -156,9 +157,13 @@ export class Conversation {
       // 创建会话状态
       this.conversationState = createConversationState();
 
-      // 创建并注册技能工具
-      const skillTools = createSkillTools(this.skillRegistry, this.conversationState);
+      // 创建并注册技能工具（传入 conversation 引用用于消息注入）
+      const skillTools = createSkillTools(this.skillRegistry, this.conversationState, this);
       setSkillTools(skillTools);
+
+      // 获取所有潜在可用技能（仅包含 name 和 description）
+      this.potentialSkills = await this.skillRegistry.discover();
+      console.log(`[Skills] Discovered ${this.potentialSkills.length} potential skills`);
 
       console.log('[Skills] System initialized');
     } catch (error) {
@@ -174,12 +179,17 @@ export class Conversation {
   async buildSystemPrompt() {
     const { getSystemPrompt } = await import('../prompt-builder.js');
 
-    // 获取已加载的技能
-    const activeSkills = this.skillsEnabled && this.conversationState
-      ? this.conversationState.getActiveSkills()
+    // 获取潜在可用技能（仅包含 name 和 description）
+    const potentialSkills = this.skillsEnabled && this.potentialSkills
+      ? this.potentialSkills
       : [];
 
-    this.systemPrompt = await getSystemPrompt(this.config, this.workflowTest, activeSkills);
+    this.systemPrompt = await getSystemPrompt(
+      this.config,
+      this.workflowTest,
+      null, // activeSkills 已不再使用（通过对话消息注入）
+      potentialSkills
+    );
 
     // 添加 workflow 测试提示词（如果需要）
     if (this.workflowTest) {
@@ -347,6 +357,42 @@ export class Conversation {
     this.messages = [];
     saveHistory([]);
     this.abortFence.reset();
+  }
+
+  /**
+   * 注入技能内容到对话历史
+   *
+   * 通过在消息历史中插入技能内容，避免修改 system prompt，
+   * 从而优化 API 缓存命中率
+   *
+   * @param {Object} skill - 技能对象
+   */
+  injectSkillMessage(skill) {
+    // 构建技能内容消息
+    const skillMessage = `## 🎯 Skill Loaded: ${skill.name}
+
+**Description**: ${skill.description}
+
+---
+
+${skill.content}
+
+---
+
+You can now use the capabilities described in this skill to help the user.`;
+
+    // 添加到消息历史（使用 user role，确保模型会读取）
+    this.messages.push({
+      role: MessageType.USER,
+      content: skillMessage,
+      metadata: {
+        type: 'skill_injection',
+        skillName: skill.name,
+        timestamp: Date.now()
+      }
+    });
+
+    console.log(`[Skills] Injected skill "${skill.name}" into conversation history`);
   }
 
   /**
