@@ -338,6 +338,98 @@ git status  # 确保提交成功
 - 不要使用 \`-i\` 标志的 git 命令（需要交互输入）`
   });
 
+  const agentsPrompt = `## 🤖 Dispatch Agent System - Specialized Search Capabilities
+
+You have access to a **Dispatch Agent System** that allows you to spawn specialized sub-agents for complex search tasks.
+
+### What is dispatch_agent?
+
+A dispatch_agent is a powerful sub-agent system that can independently execute search tasks using a restricted toolset.
+
+### Key Characteristics:
+1. **Read-only tools**: Agents can only use GlobTool, GrepTool, LS, View, ReadNotebook
+2. **Stateless execution**: Each agent call is independent and cannot modify files
+3. **Concurrent execution**: Multiple agents can run simultaneously
+4. **Result aggregation**: Agent results are returned to you for summarization
+
+### When to Use dispatch_agent:
+
+**✅ Good use cases:**
+- Searching for keywords or files where the first attempt might not find the correct match
+- Examples: "config", "logger", "helper", "utils" - common ambiguous terms
+- Multi-round exploration tasks requiring multiple search approaches
+- When you need to search across many files or directories
+- When you're uncertain about the best search strategy
+
+**❌ Avoid using:**
+- Simple single searches (use searchCode/searchFiles directly)
+- Tasks requiring file modifications (agents are read-only)
+- Time-critical operations (agents add overhead)
+- When you already know the exact file location
+
+### How to Use:
+
+**Single agent:**
+\\\`\\\`\\\`javascript
+dispatchAgent({ prompt: "Search for all configuration files and identify the main config structure" })
+\\\`\\\`\\\`
+
+**Multiple concurrent agents:**
+\\\`\\\`\\\`javascript
+dispatchAgent({
+  prompt: "Find all logger usage patterns",
+  batch: true
+})
+// In separate tool_use blocks for concurrent execution
+\\\`\\\`\\\`
+
+### Best Practices:
+
+1. **Write clear, specific prompts**: Describe what you're looking for in detail
+   - Good: "Find all files that define API endpoints and list their routes"
+   - Bad: "Search for endpoints"
+
+2. **Let agents explore**: Agents can perform multiple searches to find information
+   - Don't micromanage the search process
+   - Trust the agent to use appropriate tools
+
+3. **Summarize results**: Always review and summarize agent findings for the user
+   - Don't just return raw agent output
+   - Extract key insights and present them clearly
+
+4. **Use for exploration**: Agents excel at exploratory tasks
+   - "Find all test files and identify testing patterns"
+   - "Search for error handling patterns across the codebase"
+
+### Example Workflow:
+
+\\\`\\\`\\\`javascript
+// User asks: "How is authentication handled in this project?"
+
+// Step 1: Use dispatch_agent to explore
+dispatchAgent({
+  prompt: "Search for authentication-related files, middleware, and auth configuration. Identify the auth strategy and where it's implemented."
+})
+
+// Agent returns: Found auth middleware in src/middleware/auth.js, JWT config in config/jwt.js, etc.
+
+// Step 2: Summarize findings to user
+"Authentication uses JWT tokens. Main implementation in src/middleware/auth.js. Configuration in config/jwt.js."
+\\\`\\\`\\\`
+
+### Agent Tools Available:
+- \`searchFiles\` - Find files by pattern
+- \`searchCode\` - Search file contents
+- \`listFiles\` - List directory contents
+- \`readFile\` - Read file contents
+- \`readFileLines\` - Read specific line ranges
+- \`readFileChunk\` - Read by byte range
+
+### Monitoring:
+Use \`agentResult\` tool to check agent status and pool statistics.
+
+`;
+
   const skillsPrompt = `## 🎯 Skills System - Enhanced Capabilities
 
 You have access to a **Skills System** that provides additional specialized capabilities:
@@ -379,6 +471,12 @@ ${potentialSkills.map(skill => `- **${skill.name}**: ${skill.description}`).join
 ` : ''}
 
 `
+  systemPrompt.push({
+    type: 'text',
+    cache_control: { type: 'ephemeral' },
+    text: agentsPrompt
+  });
+
   systemPrompt.push({
     type: 'text',
     cache_control: { type: 'ephemeral' },

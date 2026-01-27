@@ -92,6 +92,27 @@ const DEFAULT_CONFIG = {
     ]
   },
 
+  // Agents 配置
+  agents: {
+    enabled: true,              // 是否启用 agent 系统
+    maxConcurrent: 3,           // 最大并发数
+    timeout: 60000,             // 超时时间（毫秒）
+    cacheEnabled: true,         // 是否启用缓存
+    cacheTTL: 300000,           // 缓存存活时间（5分钟）
+    maxTokens: 4096,            // Agent 最大 token 数
+    temperature: 0,             // Agent 温度设置（确定性输出）
+    retryAttempts: 2,           // 失败重试次数
+    retryDelay: 1000,           // 重试延迟（毫秒）
+    tools: [                    // Agent 可用工具白名单
+      'searchFiles',
+      'searchCode',
+      'listFiles',
+      'readFile',
+      'readFileLines',
+      'readFileChunk'
+    ]
+  },
+
   // UI 配置
   ui: {
     theme: 'default',

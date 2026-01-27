@@ -5,6 +5,9 @@
 
 import { getConfig, getConfigPaths, clearHistory } from '../config.js';
 import { createShortcutManager } from '../shortcuts.js';
+import { getGlobalAgentPool } from '../agents/agent-pool.js';
+import { getGlobalAgentCacheManager } from '../agents/agent-cache.js';
+import { getGlobalAgentErrorHandler } from '../agents/agent-error-handler.js';
 import path from 'path';
 import os from 'os';
 
@@ -385,6 +388,396 @@ Next conversation will start from scratch.
 }
 
 /**
+ * /agents 命令 - 管理 Agent 系统
+ * @param {Object} options - 命令选项
+ * @param {boolean} options.markdown - 是否使用 Markdown 格式（默认 true）
+ * @param {Array} options.args - 命令参数
+ * @returns {Promise<CommandResult>}
+ */
+export async function agentsCommand(options = {}) {
+  const { markdown = true, args = [] } = options;
+  
+  try {
+    // 获取 Agent Pool（如果不存在，则创建）
+    const config = getConfig();
+    let agentPool = null;
+    
+    try {
+      agentPool = getGlobalAgentPool({
+        behavior: {
+          workingDir: config.behavior?.workingDir || process.cwd()
+        },
+        agents: {
+          maxConcurrent: 3,
+          timeout: 60000
+        }
+      });
+    } catch (error) {
+      // Agent Pool 初始化失败
+      return {
+        success: false,
+        error: error.message,
+        content: `Agent Pool 初始化失败: ${error.message}`
+      };
+    }
+
+    // 解析子命令
+    const subCommand = args[0] || 'status';
+    
+    let content = '';
+    
+    if (markdown) {
+      content = `
+🤖 Agent 系统状态
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+`;
+      
+      switch (subCommand) {
+        case 'list':
+        case 'ls':
+          // 列出所有 agents
+          const runningAgents = agentPool.listRunningAgents();
+          const waitingAgents = agentPool.listWaitingAgents();
+          
+          content += `
+📊 运行中的 Agents: ${runningAgents.length}
+`;
+          if (runningAgents.length > 0) {
+            runningAgents.forEach(agent => {
+              content += `
+  🟢 ${agent.id.substring(0, 12)}...
+     状态: ${agent.status}
+     任务: ${agent.prompt}
+     运行时间: ${agent.executionTime}ms`;
+            });
+          } else {
+            content += `
+  无运行中的 agents`;
+          }
+          
+          content += `
+
+⏳ 等待队列: ${waitingAgents.length}
+`;
+          if (waitingAgents.length > 0) {
+            waitingAgents.forEach(agent => {
+              content += `
+  ⏸️  ${agent.id.substring(0, 12)}...
+     任务: ${agent.prompt}`;
+            });
+          } else {
+            content += `
+  等待队列为空`;
+          }
+          break;
+          
+        case 'stats':
+          // 显示统计信息
+          const poolStats = agentPool.getStats();
+          
+          content += `
+📈 性能统计
+  总执行数: ${poolStats.totalExecuted}
+  成功数: ${poolStats.totalSucceeded}
+  失败数: ${poolStats.totalFailed}
+  终止数: ${poolStats.totalTerminated}
+  成功率: ${poolStats.successRate}
+  平均执行时间: ${poolStats.averageExecutionTime.toFixed(0)}ms
+  峰值并发: ${poolStats.peakConcurrent}
+  
+  当前状态:
+    运行中: ${poolStats.currentlyRunning}
+    等待中: ${poolStats.currentlyWaiting}
+    可用槽位: ${agentPool.maxConcurrent - poolStats.currentlyRunning}`;
+          
+          // 缓存统计
+          try {
+            const cacheManager = getGlobalAgentCacheManager();
+            const cacheStats = cacheManager.getStats();
+            
+            content += `
+
+💾 缓存统计
+  状态: ${cacheStats.enabled ? '✅ 已启用' : '❌ 未启用'}
+  缓存条目: ${cacheStats.size}/${cacheStats.maxSize}
+  命中率: ${(cacheStats.hitRate * 100).toFixed(1)}%
+  命中次数: ${cacheStats.hits}
+  未命中次数: ${cacheStats.misses}
+  驱逐次数: ${cacheStats.evictions}
+  过期次数: ${cacheStats.expirations}`;
+          } catch (error) {
+            content += `
+
+💾 缓存统计: 不可用`;
+          }
+          
+          // 错误处理统计
+          try {
+            const errorHandler = getGlobalAgentErrorHandler();
+            const errorStats = errorHandler.getStats();
+            
+            content += `
+
+⚠️  错误处理统计
+  总错误数: ${errorStats.totalErrors}
+  重试成功: ${errorStats.retrySuccesses}
+  降级激活: ${errorStats.fallbackActivations}
+  错误率: ${(errorStats.errorRate * 100).toFixed(1)}%`;
+            
+            if (Object.keys(errorStats.errorsByType).length > 0) {
+              content += `
+  错误类型分布:`;
+              for (const [type, count] of Object.entries(errorStats.errorsByType)) {
+                content += `
+    ${type}: ${count}`;
+              }
+            }
+          } catch (error) {
+            content += `
+
+⚠️  错误处理统计: 不可用`;
+          }
+          break;
+          
+        case 'terminate':
+        case 'kill':
+          // 终止指定的 agent
+          const agentId = args[1];
+          if (!agentId) {
+            content += `
+❌ 错误: 请指定要终止的 agent ID
+  用法: /agents terminate <agent-id>`;
+          } else {
+            const terminated = agentPool.terminateAgent(agentId);
+            if (terminated) {
+              content += `
+✅ Agent 已终止
+  ID: ${agentId}`;
+            } else {
+              content += `
+❌ 终止失败
+  未找到 agent: ${agentId}`;
+            }
+          }
+          break;
+          
+        case 'clear':
+          // 清除缓存
+          try {
+            const cacheManager = getGlobalAgentCacheManager();
+            cacheManager.clear();
+            content += `
+✅ Agent 缓存已清除`;
+          } catch (error) {
+            content += `
+❌ 清除缓存失败: ${error.message}`;
+          }
+          break;
+          
+        case 'reset':
+          // 重置统计
+          agentPool.resetStats();
+          try {
+            const errorHandler = getGlobalAgentErrorHandler();
+            errorHandler.resetStats();
+          } catch (error) {
+            // 忽略
+          }
+          content += `
+✅ Agent 统计已重置`;
+          break;
+          
+        case 'status':
+        default:
+          // 显示池状态
+          const poolStatus = agentPool.getPoolStatus();
+          
+          content += `
+📊 Agent 池状态
+  最大并发数: ${poolStatus.maxConcurrent}
+  运行中: ${poolStatus.currentlyRunning}
+  等待中: ${poolStatus.currentlyWaiting}
+  可用槽位: ${poolStatus.availableSlots}
+  
+  配置:
+    超时时间: ${agentPool.timeout}ms
+    最大并发: ${agentPool.maxConcurrent}`;
+          
+          if (poolStatus.currentlyRunning > 0) {
+            const running = agentPool.listRunningAgents();
+            content += `
+
+🟢 运行中的 Agents:`;
+            running.forEach(agent => {
+              content += `
+  • ${agent.id.substring(0, 12)}... (${agent.executionTime}ms)`;
+            });
+          }
+          
+          if (poolStatus.currentlyWaiting > 0) {
+            const waiting = agentPool.listWaitingAgents();
+            content += `
+
+⏳ 等待队列:`;
+            waiting.forEach(agent => {
+              content += `
+  • ${agent.id.substring(0, 12)}...`;
+            });
+          }
+          break;
+      }
+      
+      content += `
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💡 可用子命令:
+  /agents status    显示 Agent 池状态（默认）
+  /agents list      列出所有运行中和等待中的 agents
+  /agents stats     显示性能统计
+  /agents terminate <id>  终止指定的 agent
+  /agents clear     清除 Agent 缓存
+  /agents reset     重置 Agent 统计信息
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+`;
+      
+    } else {
+      // 纯文本格式
+      content = `
+
+Agent System Status:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+`;
+      
+      switch (subCommand) {
+        case 'list':
+        case 'ls':
+          const runningAgents = agentPool.listRunningAgents();
+          const waitingAgents = agentPool.listWaitingAgents();
+          
+          content += `
+Running Agents: ${runningAgents.length}`;
+          if (runningAgents.length > 0) {
+            runningAgents.forEach(agent => {
+              content += `
+  ${agent.id.substring(0, 12)}... [${agent.status}] ${agent.executionTime}ms`;
+            });
+          } else {
+            content += `
+  No running agents`;
+          }
+          
+          content += `
+
+Waiting Queue: ${waitingAgents.length}`;
+          if (waitingAgents.length > 0) {
+            waitingAgents.forEach(agent => {
+              content += `
+  ${agent.id.substring(0, 12)}...`;
+            });
+          } else {
+            content += `
+  Queue is empty`;
+          }
+          break;
+          
+        case 'stats':
+          const poolStats = agentPool.getStats();
+          
+          content += `
+Performance Statistics:
+  Total Executed: ${poolStats.totalExecuted}
+  Succeeded: ${poolStats.totalSucceeded}
+  Failed: ${poolStats.totalFailed}
+  Terminated: ${poolStats.totalTerminated}
+  Success Rate: ${poolStats.successRate}
+  Avg Execution Time: ${poolStats.averageExecutionTime.toFixed(0)}ms
+  Peak Concurrent: ${poolStats.peakConcurrent}
+  
+  Current Status:
+    Running: ${poolStats.currentlyRunning}
+    Waiting: ${poolStats.currentlyWaiting}
+    Available Slots: ${agentPool.maxConcurrent - poolStats.currentlyRunning}`;
+          break;
+          
+        case 'terminate':
+        case 'kill':
+          const agentId = args[1];
+          if (!agentId) {
+            content += `
+Error: Please specify agent ID to terminate
+  Usage: /agents terminate <agent-id>`;
+          } else {
+            const terminated = agentPool.terminateAgent(agentId);
+            if (terminated) {
+              content += `
+Agent terminated: ${agentId}`;
+            } else {
+              content += `
+Failed to terminate agent: ${agentId}`;
+            }
+          }
+          break;
+          
+        case 'clear':
+          try {
+            const cacheManager = getGlobalAgentCacheManager();
+            cacheManager.clear();
+            content += `
+Agent cache cleared`;
+          } catch (error) {
+            content += `
+Failed to clear cache: ${error.message}`;
+          }
+          break;
+          
+        case 'reset':
+          agentPool.resetStats();
+          content += `
+Agent statistics reset`;
+          break;
+          
+        case 'status':
+        default:
+          const poolStatus = agentPool.getPoolStatus();
+          
+          content += `
+Agent Pool Status:
+  Max Concurrent: ${poolStatus.maxConcurrent}
+  Running: ${poolStatus.currentlyRunning}
+  Waiting: ${poolStatus.currentlyWaiting}
+  Available Slots: ${poolStatus.availableSlots}`;
+          break;
+      }
+      
+      content += `
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Available Subcommands:
+  /agents status    Show agent pool status (default)
+  /agents list      List all running and waiting agents
+  /agents stats     Show performance statistics
+  /agents terminate <id>  Terminate specified agent
+  /agents clear     Clear agent cache
+  /agents reset     Reset agent statistics
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+`;
+    }
+    
+    return {
+      success: true,
+      content: content.trim()
+    };
+    
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message,
+      content: `Error: ${error.message}`
+    };
+  }
+}
+
+/**
  * /help 命令 - 显示帮助信息
  * @param {Object} options - 命令选项
  * @param {boolean} options.markdown - 是否使用 Markdown 格式（默认 true）
@@ -407,6 +800,7 @@ export function helpCommand(options = {}) {
   /keys          显示键盘快捷键参考
   /config        显示当前配置
   /skills        显示技能系统状态
+  /agents        管理 Agent 系统
   /help          显示本帮助信息
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -429,6 +823,7 @@ Information Commands:
   /keys          Show keyboard shortcuts reference
   /config        Show current configuration
   /skills        Show skills system status
+  /agents        Manage agent system
   /help          Show this help message
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -468,6 +863,11 @@ export const COMMAND_REGISTRY = {
     handler: skillsCommand,
     description: '显示技能系统状态',
     descriptionEn: 'Show skills system status'
+  },
+  '/agents': {
+    handler: agentsCommand,
+    description: '管理 Agent 系统',
+    descriptionEn: 'Manage agent system'
   },
   '/help': {
     handler: helpCommand,

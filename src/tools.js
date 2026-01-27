@@ -16,6 +16,7 @@ import path from 'path';
 import { executeBashCommand } from './bash-runner.js';
 import { glob } from 'glob';
 import { bashResultCache } from './bash-result-cache.js';
+import { createAgentExecutor } from './agents/agent-executor.js';
 
 /**
  * 创建一个配置上下文，用于工具执行器
@@ -1386,6 +1387,254 @@ bashResult({ result_id: "res_123", action: "full" })
 });
 
 /**
+ * Dispatch Agent 工具 - 启动一个专门的搜索 agent
+ * 
+ * 这是一个强大的工具，允许主 AI 启动专门的子 agents 来执行复杂的搜索任务。
+ * Agent 只能使用只读工具（搜索、查看文件），不能修改任何内容。
+ */
+export const dispatchAgentTool = betaZodTool({
+  name: 'dispatchAgent',
+  description: `启动一个专门的搜索 Agent 来执行复杂的查找任务。
+
+**何时使用：**
+- 需要搜索关键词或文件，不确定第一次能找到正确匹配
+- 例如：搜索 "config" 或 "logger" 等常见关键词
+- 需要多轮搜索和探索的任务
+- 想要并行执行多个搜索任务
+
+**Agent 的能力：**
+- ✅ 只读工具：searchFiles, searchCode, listFiles, readFile
+- ❌ 不能修改文件或执行命令
+- 💾 自动缓存：相同任务会直接返回缓存结果（7天有效期）
+
+**示例：**
+\`\`\`javascript
+// 单个任务
+dispatchAgent({ prompt: "找到所有与日志相关的配置文件" })
+
+// 批量执行多个任务（并发）
+dispatchAgent({ 
+  batch: [
+    { prompt: "找到所有配置文件" },
+    { prompt: "找到所有测试文件" },
+    { prompt: "找到所有 API 端点" }
+  ]
+})
+\`\`\`
+
+**注意：** Agent 返回结果后，你需要总结后展示给用户。`,
+  inputSchema: z.object({
+    prompt: z.string().optional().describe('任务描述（单个任务时使用）'),
+    batch: z.array(z.object({
+      prompt: z.string().describe('任务描述'),
+      agentId: z.string().optional().describe('Agent ID（可选）'),
+      timeout: z.number().optional().describe('超时时间（毫秒）'),
+      maxTokens: z.number().optional().describe('最大 token 数')
+    })).optional().describe('批量执行多个任务'),
+    agentId: z.string().optional().describe('Agent ID（单个任务时可选）'),
+    conversationId: z.string().optional().describe('对话 ID（用于缓存，建议提供）'),
+    timeout: z.number().optional().describe('超时时间（毫秒，默认 60000）'),
+    maxTokens: z.number().optional().describe('最大 token 数（默认 4096）'),
+    useCache: z.boolean().optional().describe('是否使用缓存（默认 true）')
+  }),
+  run: async (input) => {
+    if (!toolExecutorContext) {
+      return JSON.stringify({
+        success: false,
+        error: 'Tool executor context not initialized'
+      });
+    }
+
+    try {
+      // 动态导入 Agent Pool 和缓存处理
+      const { getGlobalAgentPool } = await import('./agents/agent-pool.js');
+      const { checkAgentCache, saveAgentResult } = await import('./agents/agent-cache-handler.js');
+      
+      // 创建或获取 Agent Pool
+      if (!toolExecutorContext.agentPool) {
+        toolExecutorContext.agentPool = getGlobalAgentPool({
+          behavior: {
+            workingDir: toolExecutorContext.workingDir
+          },
+          agents: {
+            maxConcurrent: 3,
+            timeout: 60000
+          }
+        });
+      }
+
+      // 批量执行模式
+      if (input.batch && Array.isArray(input.batch) && input.batch.length > 0) {
+        const results = await toolExecutorContext.agentPool.executeBatch(
+          input.batch.map(task => ({
+            prompt: task.prompt,
+            agentId: task.agentId,
+            timeout: task.timeout || input.timeout || 60000,
+            maxTokens: task.maxTokens || input.maxTokens || 4096
+          }))
+        );
+        
+        return JSON.stringify({
+          success: true,
+          mode: 'batch',
+          count: results.length,
+          results: results
+        });
+      }
+
+      // 单个任务执行模式
+      if (!input.prompt) {
+        return JSON.stringify({
+          success: false,
+          error: 'Either "prompt" or "batch" parameter is required'
+        });
+      }
+
+      // 检查缓存（如果启用）
+      const useCache = input.useCache !== false; // 默认启用
+      const conversationId = input.conversationId || 'default';
+      
+      if (useCache) {
+        const cached = await checkAgentCache(
+          conversationId,
+          input.prompt,
+          toolExecutorContext.workingDir
+        );
+        
+        if (cached) {
+          return JSON.stringify({
+            success: true,
+            cached: true,
+            agentId: cached.agentId,
+            result: cached.result,
+            stats: cached.stats
+          });
+        }
+      }
+
+      // 执行 agent 任务
+      const result = await toolExecutorContext.agentPool.executeAgent({
+        prompt: input.prompt,
+        agentId: input.agentId,
+        timeout: input.timeout || 60000,
+        maxTokens: input.maxTokens || 4096
+      });
+
+      // 保存结果到缓存（如果执行成功）
+      if (result.success && useCache) {
+        try {
+          const savedAgentId = await saveAgentResult(
+            conversationId,
+            input.prompt,
+            result,
+            toolExecutorContext.workingDir
+          );
+          
+          // 添加保存的 agent ID 到结果
+          result.agentId = savedAgentId;
+          result.saved = true;
+        } catch (error) {
+          // 保存失败不影响主流程
+          console.warn('[DispatchAgent] Failed to save result:', error.message);
+        }
+      }
+
+      return JSON.stringify(result);
+    } catch (error) {
+      return JSON.stringify({
+        success: false,
+        error: error.message,
+        stack: error.stack
+      });
+    }
+  }
+});
+
+export const agentResultTool = betaZodTool({
+  name: 'agentResult',
+  description: `查询 Agent 执行结果或池状态。
+
+**何时使用：**
+- 查询特定 agent 的执行状态和结果
+- 获取当前 agent 池的状态信息
+- 查看运行中和等待中的 agents
+- 获取性能统计信息
+
+**Agent 的能力：**
+- ✅ 只读工具：searchFiles, searchCode, listFiles, readFile
+- ❌ 不能修改文件或执行命令
+
+**示例：**
+\`\`\`javascript
+// 查询特定 agent 结果
+agentResult({ agent_id: "agent_1706179200_abc123", action: "full" })
+
+// 获取摘要
+agentResult({ agent_id: "agent_1706179200_abc123", action: "summary" })
+
+// 获取池状态
+agentResult({ action: "pool_status" })
+
+// 列出运行中的 agents
+agentResult({ action: "list_running" })
+
+// 获取性能统计
+agentResult({ action: "stats" })
+\`\`\`
+
+**注意：** 此工具只查询信息，不执行新任务。`,
+  inputSchema: z.object({
+    agent_id: z.string().optional().describe('Agent ID（查询特定 agent 时需要）'),
+    action: z.enum(['full', 'summary', 'search', 'files', 'pool_status', 'list_running', 'list_waiting', 'stats', 'terminate']).describe('操作类型'),
+    pattern: z.string().optional().describe('搜索模式（用于 search action）'),
+    maxResults: z.number().optional().describe('最大结果数（用于 search 和 files action，默认 50）')
+  }),
+  run: async (input) => {
+    if (!toolExecutorContext) {
+      return JSON.stringify({
+        success: false,
+        error: 'Tool executor context not initialized'
+      });
+    }
+
+    try {
+      // 先尝试从持久化存储获取（针对 full, summary, search, files）
+      if (['full', 'summary', 'search', 'files'].includes(input.action)) {
+        if (!input.agent_id) {
+          return JSON.stringify({
+            success: false,
+            error: 'agent_id is required for this action'
+          });
+        }
+
+        const { handleStoredAgentResult } = await import('./agents/agent-result-handler.js');
+        return await handleStoredAgentResult(input, toolExecutorContext.workingDir);
+      }
+
+      // 其他操作从 Agent Pool 获取
+      const pool = toolExecutorContext.agentPool;
+      
+      if (!pool) {
+        return JSON.stringify({
+          success: false,
+          error: 'Agent pool not initialized. Please call dispatchAgent first.'
+        });
+      }
+
+      // 处理池操作
+      const { handlePoolOperations } = await import('./agents/agent-result-handler.js');
+      return handlePoolOperations(input, pool);
+    } catch (error) {
+      return JSON.stringify({
+        success: false,
+        error: error.message,
+        stack: error.stack
+      });
+    }
+  }
+});
+
+/**
  * 所有工具的导出映射
  */
 const TOOLS_MAP = {
@@ -1400,7 +1649,9 @@ const TOOLS_MAP = {
   regionConstrainedEdit: regionConstrainedEditTool,
   searchFiles: searchFilesTool,
   searchCode: searchCodeTool,
-  listFiles: listFilesTool
+  listFiles: listFilesTool,
+  dispatchAgent: dispatchAgentTool,
+  agentResult: agentResultTool
 };
 
 // 动态技能工具（运行时添加）
@@ -1655,6 +1906,29 @@ export function generateToolSummary(toolName, input, result) {
         detailInfo += ` [${result.lineCount} lines]`;
       } else if (result.matchCount !== undefined) {
         detailInfo += ` [${result.matchCount} matches]`;
+      }
+      
+      return { summary, detailInfo };
+
+    case 'dispatchAgent':
+      const agentPrompt = input.prompt || '';
+      const shortPrompt = agentPrompt.substring(0, 30);
+      summary = success ? `🤖 Agent` : `✗ Agent`;
+      
+      // 详细信息：任务描述 + agentId
+      detailInfo = shortPrompt + (agentPrompt.length > 30 ? '...' : '');
+      if (result.agentId) {
+        detailInfo += ` [${result.agentId.substring(0, 8)}...]`;
+      }
+      
+      // 添加执行时间
+      if (result.executionTime) {
+        detailInfo += ` [${result.executionTime}ms]`;
+      }
+      
+      // 添加结果摘要
+      if (result.result && result.result.summary) {
+        detailInfo += ` - ${result.result.summary.substring(0, 50)}${result.result.summary.length > 50 ? '...' : ''}`;
       }
       
       return { summary, detailInfo };
