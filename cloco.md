@@ -2,6 +2,37 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 📁 文档组织规范
+
+**重要**：所有计划、进度报告、测试报告等临时性质的文档都应该放在 `plans/` 目录中，而不是根目录。
+
+### 应该放在 `plans/` 的文档类型：
+- **计划文档**：包含 "PLAN"、"计划" 的文档
+- **进度报告**：包含 "PROGRESS"、"SUMMARY"、"进度"、"总结" 的文档
+- **测试报告**：包含 "TEST"、"测试"、"REPORT"、"报告" 的文档
+- **验证报告**：包含 "VERIFICATION"、"VALIDATION"、"验证" 的文档
+- **实现方案**：包含 "IMPLEMENTATION"、"实现" 的文档
+- **完成报告**：包含 "COMPLETE"、"COMPLETION"、"完成" 的文档
+- **阶段总结**：包含 "PHASE"、"阶段" 的文档
+- **其他临时文档**：实验记录、优化建议、TODO 清理等
+
+### 应该保留在根目录的文档：
+- **用户指南**：GUIDE、QUICK_START、README 等
+- **API 文档**：API_GUIDE 等
+- **配置文档**：cloco.md、CLAUDE.md、winfix.md 等
+- **项目文档**：CHANGELOG、QUICK_REFERENCE 等
+
+**示例**：
+- ✅ `plans/DISPATCH_AGENT_PLAN.md` （计划）
+- ✅ `plans/PHASE6_COMPLETION_SUMMARY.md` （完成总结）
+- ✅ `plans/AGENT_TEST_REPORT.md` （测试报告）
+- ❌ `AGENT_SYSTEM_GUIDE.md` （用户指南，应在根目录）
+- ❌ `README.md` （项目文档，应在根目录）
+
+**注意**：当创建新的计划、进度或报告文档时，请直接将其创建在 `plans/` 目录中。
+
+---
+
 # 项目概述
 
 这是一个通过编程试验 Node.js 对进程调度 bash 行为的实验项目。
