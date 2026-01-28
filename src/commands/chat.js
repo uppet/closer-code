@@ -4,6 +4,10 @@
  */
 
 export default async function chatCommand(args, options) {
+  // 将 testMode 选项传递给全局，供 closer-cli.jsx 使用
+  if (options.test) {
+    process.env.CLOSER_TEST_MODE = '1';
+  }
   // 动态导入并运行现有的交互模式
   // 由于 closer-cli.jsx 是 jsx 文件且使用 ink，我们直接导入它的主逻辑
   await import('../closer-cli.jsx');

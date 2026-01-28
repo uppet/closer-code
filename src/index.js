@@ -70,6 +70,22 @@ async function main() {
     return;
   }
 
+  // 极简模式
+  if (options.simple) {
+    const { default: minimalMode } = await import('./commands/minimal.js');
+
+    // 检查配置，如无则自动运行setup
+    if (!await hasConfig()) {
+      console.log('⚙️  首次使用，让我们完成配置...\n');
+      const { default: setup } = await import('./commands/setup.js');
+      await setup([], {});
+      console.log('\n✅ 配置完成！\n');
+    }
+
+    await minimalMode(args, options);
+    return;
+  }
+
   // 交互模式（默认）
   const { default: chatMode } = await import('./commands/chat.js');
 

@@ -78,9 +78,10 @@ const WORKFLOW_SYSTEM_PROMPT = `
  * 对话会话（重构版）
  */
 export class Conversation {
-  constructor(config, workflowTest = false) {
+  constructor(config, workflowTest = false, testMode = false) {
     this.config = config;
     this.workflowTest = workflowTest;
+    this.testMode = testMode;  // 测试模式：不加载/保存历史
     this.messages = [];
     this.isProcessing = false;
 
@@ -117,15 +118,21 @@ export class Conversation {
       await this.initializeSkills();
     }
 
-    // 加载历史
-    const history = loadHistory(this.config.behavior.workingDir);
-    // SDK 不接受 role: 'tool' 的消息
-    this.messages = history
-      .filter(msg => msg.role === 'user' || msg.role === 'assistant')
-      .map(msg => ({
-        role: msg.role,
-        content: msg.content
-      }));
+    // 加载历史（测试模式下不加载）
+    if (!this.testMode) {
+      const history = loadHistory(this.config.behavior.workingDir);
+      // SDK 不接受 role: 'tool' 的消息
+      this.messages = history
+        .filter(msg => msg.role === 'user' || msg.role === 'assistant')
+        .map(msg => ({
+          role: msg.role,
+          content: msg.content
+        }));
+    } else {
+      // 测试模式：空历史
+      this.messages = [];
+      console.log('[Test Mode] History loading skipped');
+    }
 
     // 构建系统提示
     await this.buildSystemPrompt();
@@ -330,8 +337,12 @@ export class Conversation {
       // 记录 AI 响应
       await logAIResponse({ content: [{ type: 'text', text: textContent }] });
 
-      // 保存历史
-      saveHistory(this.messages);
+      // 保存历史（测试模式下不保存）
+      if (!this.testMode) {
+        saveHistory(this.messages);
+      } else {
+        console.log('[Test Mode] History saving skipped');
+      }
 
       return {
         content: textContent,
@@ -364,7 +375,9 @@ export class Conversation {
    */
   clearHistory() {
     this.messages = [];
-    saveHistory([]);
+    if (!this.testMode) {
+      saveHistory([]);
+    }
     this.abortFence.reset();
   }
 
@@ -435,7 +448,9 @@ You can now use the capabilities described in this skill to help the user.`;
     if (data.plan) {
       this.planManager.currentPlan = data.plan;
     }
-    saveHistory(this.messages);
+    if (!this.testMode) {
+      saveHistory(this.messages);
+    }
   }
 
   /**
@@ -478,8 +493,8 @@ You can now use the capabilities described in this skill to help the user.`;
 /**
  * 创建对话会话
  */
-export async function createConversation(config, workflowTest = false) {
-  const conversation = new Conversation(config, workflowTest);
+export async function createConversation(config, workflowTest = false, testMode = false) {
+  const conversation = new Conversation(config, workflowTest, testMode);
   await conversation.initialize();
   return conversation;
 }

@@ -21,6 +21,7 @@ const MAX_MEMORY_SIZE = 100; // 内存中保留的最近记录数
 export class InputHistory {
   constructor(options = {}) {
     this.maxSize = options.maxSize || MAX_MEMORY_SIZE;
+    this.testMode = options.testMode || false; // 测试模式：不加载/保存历史
     this.history = [];
     this.currentIndex = -1;
     this.temporaryInput = ''; // 用户在浏览历史时的临时输入
@@ -34,13 +35,20 @@ export class InputHistory {
    * 初始化：从文件加载历史记录
    */
   async load() {
+    // 测试模式下不加载历史
+    if (this.testMode) {
+      console.log('[History] Test mode: skipping history load');
+      this.history = [];
+      return 0;
+    }
+
     try {
       const data = fs.readFileSync(HISTORY_FILE, 'utf-8');
       const allHistory = JSON.parse(data);
-      
+
       // 只加载最近的记录到内存
       this.history = allHistory.slice(-this.maxSize);
-      
+
       console.log(`[History] Loaded ${this.history.length} entries from ${HISTORY_FILE}`);
       return this.history.length;
     } catch (error) {
@@ -56,6 +64,12 @@ export class InputHistory {
    * 保存历史记录到文件
    */
   async save() {
+    // 测试模式下不保存历史
+    if (this.testMode) {
+      console.log('[History] Test mode: skipping history save');
+      return false;
+    }
+
     try {
       // 确保目录存在
       if (!fs.existsSync(HISTORY_DIR)) {
@@ -82,7 +96,7 @@ export class InputHistory {
 
       // 保存到文件
       fs.writeFileSync(HISTORY_FILE, JSON.stringify(allHistory, null, 2), 'utf-8');
-      
+
       console.log(`[History] Saved ${allHistory.length} entries to ${HISTORY_FILE}`);
       return true;
     } catch (error) {
@@ -325,11 +339,16 @@ export class InputHistory {
  */
 export function createHistoryManager(options = {}) {
   const history = new InputHistory(options);
-  
-  // 自动加载历史记录
-  history.load().catch(err => {
-    console.error('[History] Failed to initialize:', err);
-  });
+
+  // 测试模式下不加载历史
+  if (!history.testMode) {
+    // 自动加载历史记录
+    history.load().catch(err => {
+      console.error('[History] Failed to initialize:', err);
+    });
+  } else {
+    console.log('[History] Test mode: history manager created without loading');
+  }
 
   return history;
 }

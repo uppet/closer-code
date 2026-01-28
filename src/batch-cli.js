@@ -31,7 +31,8 @@ function parseArgs() {
     file: null,
     output: 'text', // text, json, verbose
     debug: false,
-    help: false
+    help: false,
+    test: false // 测试模式
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -47,6 +48,8 @@ function parseArgs() {
       options.output = 'verbose';
     } else if (arg === '--debug' || arg === '-d') {
       options.debug = true;
+    } else if (arg === '--test' || arg === '-t') {
+      options.test = true;
     } else if (!arg.startsWith('-')) {
       options.prompt = arg;
     }
@@ -275,7 +278,11 @@ async function runBatch() {
     const config = getConfig();
 
     formatter.progress('创建对话会话...');
-    const conversation = await createConversation(config);
+    const conversation = await createConversation(config, false, options.test);
+
+    if (options.test) {
+      console.error('[Test Mode] Conversation created without history');
+    }
 
     formatter.progress('发送消息到 AI...');
     const response = await conversation.sendMessage(

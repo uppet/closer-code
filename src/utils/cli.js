@@ -17,6 +17,8 @@ export function parseOptions(argv) {
     version: false,
     batch: false,
     b: false,
+    simple: false,            // 极简模式 (-s, --simple)
+    test: false,              // 测试模式 (-t, --test)
     json: false,
     file: null,
     verbose: false,
@@ -39,6 +41,10 @@ export function parseOptions(argv) {
     } else if (arg === '-b' || arg === '--batch') {
       options.batch = true;
       options.b = true;
+    } else if (arg === '-s' || arg === '--simple') {
+      options.simple = true;
+    } else if (arg === '-t' || arg === '--test') {
+      options.test = true;
     } else if (arg === '-j' || arg === '--json') {
       options.json = true;
     } else if (arg === '-f' || arg === '--file') {

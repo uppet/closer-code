@@ -390,7 +390,10 @@ function App() {
   const conversationRef = useRef(null); // Conversation 对象引用
   const inputRef = useRef(''); // 用于在 useInput 中获取最新的 input 值
   // 历史记录管理器
-  const [inputHistory] = useState(() => createHistoryManager({ maxSize: 100 }));
+  const [inputHistory] = useState(() => createHistoryManager({
+    maxSize: 100,
+    testMode: process.env.CLOSER_TEST_MODE === '1'
+  }));
 
   // 当消息更新时，重新计算行
   useEffect(() => {
@@ -577,9 +580,13 @@ function App() {
           limit: tokenLimit
         }));
 
-        const conv = await createConversation(cfg);
+        const conv = await createConversation(cfg, false, process.env.CLOSER_TEST_MODE === '1');
         setConversation(conv);
         conversationRef.current = conv; // 保存引用
+
+        if (process.env.CLOSER_TEST_MODE === '1') {
+          console.log('[Test Mode] Running without history persistence');
+        }
 
         // 欢迎消息
         const welcomeMsg = {

@@ -16,6 +16,8 @@ Cloco - AI 编程助手 v${version}
 使用方式:
   cloco [选项] [提示词]
   cloco -b|--batch [选项] <提示词>
+  cloco -s|--simple                   # 极简模式
+  cloco -t|--test                     # 测试模式（不保存历史）
   cloco config <操作> [参数]
   cloco setup|upgrade|version|help
 
@@ -29,6 +31,16 @@ Cloco - AI 编程助手 v${version}
   cloco -b --json "生成代码" > out.js  # JSON 格式输出
   cloco -b --file prompt.txt          # 从文件读取提示词
   cloco -b --verbose "分析"            # 详细输出（包含工具调用）
+
+极简模式:
+  cloco -s                            # 启动极简界面
+  cloco --simple                      # 只保留输入框，适合快速对话
+
+测试模式:
+  cloco -t                            # 测试模式（不加载/保存历史）
+  cloco --test                        # 仅在内存中保存对话内容
+  cloco -s -t                         # 极简 + 测试模式
+  cloco -b -t "问题"                  # 批处理 + 测试模式
 
 配置管理:
   cloco config                        # 查看当前配置
@@ -45,6 +57,8 @@ Cloco - AI 编程助手 v${version}
 
 选项:
   -b, --batch                         # 批处理模式
+  -s, --simple                        # 极简模式（只保留输入框）
+  -t, --test                          # 测试模式（不加载/保存历史）
   -j, --json                          # JSON 格式输出
   -f, --file <文件>                   # 从文件读取提示词
   --verbose                           # 详细输出模式
