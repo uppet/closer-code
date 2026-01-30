@@ -72,9 +72,10 @@ async function main() {
 
   // 极简模式
   if (options.simple) {
+    // const { startDoubleCtrlc } = await import('../double_ctrlc.jsx');
     const { default: minimalMode } = await import('./commands/minimal.js');
 
-    // 检查配置，如无则自动运行setup
+    // // 检查配置，如无则自动运行setup
     if (!await hasConfig()) {
       console.log('⚙️  首次使用，让我们完成配置...\n');
       const { default: setup } = await import('./commands/setup.js');
@@ -83,6 +84,7 @@ async function main() {
     }
 
     await minimalMode(args, options);
+    // await startDoubleCtrlc();
     return;
   }
 

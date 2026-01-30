@@ -488,6 +488,103 @@ You can now use the capabilities described in this skill to help the user.`;
     await this.abortFence.abortCurrentPhase();
     this.isProcessing = false;
   }
+
+  /**
+   * 清理所有资源
+   * 在进程退出前调用，确保所有子模块正确关闭
+   */
+  async cleanup() {
+    console.log('[Cleanup] 正在清理 Conversation 资源...');
+
+    try {
+      // 1. 取消所有进行中的操作
+      if (this.isProcessing) {
+        try {
+          await this.abortCurrentPhase();
+          console.log('[Cleanup] ✓ 取消进行中的操作');
+        } catch (error) {
+          console.error('[Cleanup] Abort phase error:', error.message);
+        }
+      }
+
+      // 2. 清理 MCP 集成
+      if (this.mcpIntegration) {
+        try {
+          if (typeof this.mcpIntegration.close === 'function') {
+            await this.mcpIntegration.close();
+            console.log('[Cleanup] ✓ MCP 集成已清理');
+          }
+        } catch (error) {
+          console.error('[Cleanup] MCP cleanup error:', error.message);
+        }
+      }
+
+      // 3. 清理工具执行器
+      if (this.toolExecutor) {
+        try {
+          if (typeof this.toolExecutor.cleanup === 'function') {
+            await this.toolExecutor.cleanup();
+            console.log('[Cleanup] ✓ 工具执行器已清理');
+          }
+        } catch (error) {
+          console.error('[Cleanup] Tool executor cleanup error:', error.message);
+        }
+      }
+
+      // 4. 清理技能注册表
+      if (this.skillRegistry) {
+        try {
+          if (typeof this.skillRegistry.close === 'function') {
+            await this.skillRegistry.close();
+            console.log('[Cleanup] ✓ 技能注册表已清理');
+          }
+        } catch (error) {
+          console.error('[Cleanup] Skill registry cleanup error:', error.message);
+        }
+      }
+
+      // 5. 清理 Abort 控制器
+      if (this.abortFence) {
+        try {
+          if (typeof this.abortFence.cleanup === 'function') {
+            this.abortFence.cleanup();
+            console.log('[Cleanup] ✓ Abort 控制器已清理');
+          }
+        } catch (error) {
+          console.error('[Cleanup] Abort fence cleanup error:', error.message);
+        }
+      }
+
+      // 6. 清理流处理器
+      if (this.streamHandler) {
+        try {
+          if (typeof this.streamHandler.cleanup === 'function') {
+            this.streamHandler.cleanup();
+            console.log('[Cleanup] ✓ 流处理器已清理');
+          }
+        } catch (error) {
+          console.error('[Cleanup] Stream handler cleanup error:', error.message);
+        }
+      }
+
+      // 7. 清理计划管理器
+      if (this.planManager) {
+        try {
+          if (typeof this.planManager.cleanup === 'function') {
+            this.planManager.cleanup();
+            console.log('[Cleanup] ✓ 计划管理器已清理');
+          }
+        } catch (error) {
+          console.error('[Cleanup] Plan manager cleanup error:', error.message);
+        }
+      }
+
+      console.log('[Cleanup] ✓ 所有资源已清理');
+    } catch (error) {
+      console.error('[Cleanup] Unexpected error:', error.message);
+      throw error;
+    }
+  }
 }
 
 /**

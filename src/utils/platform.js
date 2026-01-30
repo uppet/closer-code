@@ -4,6 +4,9 @@
  * 用于检测当前运行平台和功能支持情况
  */
 
+import { fileURLToPath } from 'url';
+import { basename } from 'path';
+
 /**
  * 检测是否支持作业控制（SIGTSTP 信号）
  *
@@ -245,6 +248,35 @@ export function printPlatformDebugInfo() {
   console.log('═══════════════════════════════════════════════════');
 }
 
+/**
+ * 检查当前模块是否是主模块（直接运行）
+ *
+ * 跨平台兼容的解决方案，通过比较文件名来判断
+ *
+ * @returns {boolean} 如果是主模块返回 true
+ *
+ * 使用示例：
+ * ```javascript
+ * import { isMainModule } from './utils/platform.js';
+ *
+ * if (isMainModule(import.meta.url)) {
+ *   // 直接运行此文件时的代码
+ *   startApp();
+ * }
+ * ```
+ *
+ * 为什么需要这个函数？
+ * - Windows 下 `process.argv[1]` 是 `C:\path\to\file.js`
+ * - `import.meta.url` 是 `file:///C:/path/to/file.js`
+ * - 直接比较路径会失败
+ * - 通过比较文件名可以跨平台工作
+ */
+export function isMainModule(metaUrl) {
+  const currentFileName = basename(fileURLToPath(metaUrl));
+  const mainFileName = basename(process.argv[1]);
+  return currentFileName === mainFileName;
+}
+
 // 默认导出所有函数
 export default {
   supportsJobControl,
@@ -255,5 +287,6 @@ export default {
   isGitBash,
   getTerminalType,
   getPlatformInfo,
-  printPlatformDebugInfo
+  printPlatformDebugInfo,
+  isMainModule
 };

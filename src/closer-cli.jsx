@@ -15,7 +15,7 @@ import { createHistoryManager } from './input/history.js';
 import { EnhancedTextInputWithShortcuts } from './input/enhanced-input.jsx';
 import FullscreenConversation from './components/fullscreen-conversation.jsx';
 import { ToolDetailPanel } from './components/tool-detail-view.jsx';
-import { safeSuspend, getPlatformName } from './utils/platform.js';
+import { safeSuspend, getPlatformName, isMainModule } from './utils/platform.js';
 import { useSmartThrottledState } from './hooks/use-throttled-state.js';
 import { executeSlashCommand } from './commands/slash-commands.js';
 import fs from 'fs';
@@ -1435,8 +1435,18 @@ export async function exportConversation(conversation, filename) {
   }
 }
 
-// 启动应用
-render(<App />, {exitOnCtrlC: false});
+/**
+ * 启动交互模式
+ * 导出函数，而不是立即渲染，避免导入时就启动UI
+ */
+export function startChatMode() {
+  render(<App />, {exitOnCtrlC: false});
+}
+
+// 如果直接运行此文件（例如 node src/closer-cli.jsx），则启动
+if (isMainModule(import.meta.url)) {
+  startChatMode();
+}
 
 // 注意：不在这里设置 SIGINT 处理器，因为 useInput 会处理 Ctrl+C
 // 如果在这里设置，会导致第一次 Ctrl+C 就直接退出

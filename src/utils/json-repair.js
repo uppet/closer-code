@@ -38,7 +38,6 @@ export function safeJSONParse(text, options = {}) {
     } catch (repairError) {
       if (!silent) {
         console.error('[JSON Parse Error]: Cannot repair JSON');
-        console.error('[Original text]:', text.substring(0, 200));
         console.error('[Repair error]:', repairError.message);
       }
       return fallback;

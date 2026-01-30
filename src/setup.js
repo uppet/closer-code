@@ -8,6 +8,7 @@ import { homedir } from 'os';
 import { join, dirname } from 'path';
 import { createInterface } from 'readline';
 import { execSync } from 'child_process';
+import { isMainModule } from './utils/platform.js';
 
 const CONFIG_DIR = join(homedir(), '.closer-code');
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
@@ -23,7 +24,7 @@ function question(prompt) {
   });
 }
 
-async function setup() {
+async function setupInternal() {
   console.log('🚀 Closer Code 初始化向导\n');
 
   // 创建配置目录
@@ -144,4 +145,15 @@ async function setup() {
   rl.close();
 }
 
-setup().catch(console.error);
+/**
+ * 导出配置函数，而不是立即执行
+ * 避免在 import 时就运行配置
+ */
+export function setup() {
+  return setupInternal();
+}
+
+// 如果直接运行此文件，则启动配置
+if (isMainModule(import.meta.url)) {
+  setup().catch(console.error);
+}

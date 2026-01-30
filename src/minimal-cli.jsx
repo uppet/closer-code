@@ -13,7 +13,7 @@ import { createConversation } from './conversation.js';
 import { getConfig } from './config.js';
 import { createHistoryManager } from './input/history.js';
 import { EnhancedTextInputWithShortcuts } from './input/enhanced-input.jsx';
-import { safeSuspend, getPlatformName } from './utils/platform.js';
+import { safeSuspend, getPlatformName, isMainModule } from './utils/platform.js';
 
 /**
  * 极简模式主组件
@@ -153,7 +153,51 @@ function App() {
       if (now - lastCtrlC < 1500) {
         // 1.5秒内再次按下，退出程序
         console.log('\n👋 再见！\n');
-        process.exit(0);
+
+        // 设置强制退出超时（2秒后强制退出）
+        const forceExitTimeout = setTimeout(() => {
+          console.log('[Exit] ⚠️ 清理超时，强制退出');
+          process.exit(1);
+        }, 2000);
+
+        // 异步清理资源
+        (async () => {
+          try {
+            // 清理 conversation 资源
+            if (conversationRef.current) {
+              if (typeof conversationRef.current.cleanup === 'function') {
+                await conversationRef.current.cleanup();
+              }
+            }
+
+            // 移除所有事件监听器
+            process.removeAllListeners('SIGCONT');
+            process.removeAllListeners('SIGINT');
+            process.removeAllListeners('SIGHUP');
+
+            // 恢复终端状态
+            if (process.stdin.isTTY) {
+              try {
+                process.stdin.setRawMode(false);
+                process.stdin.pause();
+              } catch (error) {
+                // 忽略
+              }
+            }
+
+            // 取消强制退出
+            clearTimeout(forceExitTimeout);
+
+            // 正常退出
+            process.exit(0);
+          } catch (error) {
+            console.error('[Exit Error]', error.message);
+            clearTimeout(forceExitTimeout);
+            process.exit(1);
+          }
+        })();
+
+        return;
       } else {
         // 第一次按下，显示提示
         setShowExitHint(true);
@@ -256,5 +300,15 @@ function App() {
   );
 }
 
-// 启动应用
-render(<App />, { exitOnCtrlC: false });
+/**
+ * 启动极简模式
+ * 导出函数，而不是立即渲染，避免导入时就启动UI
+ */
+export function startMinimalMode() {
+  render(<App />, { exitOnCtrlC: false });
+}
+
+// 如果直接运行此文件（例如 node src/minimal-cli.jsx），则启动
+if (isMainModule(import.meta.url)) {
+  startMinimalMode();
+}

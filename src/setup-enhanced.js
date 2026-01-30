@@ -8,6 +8,7 @@ import { existsSync, mkdirSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import { createInterface } from 'readline';
+import { isMainModule } from './utils/platform.js';
 
 const CONFIG_DIR = join(homedir(), '.closer-code');
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
@@ -368,9 +369,9 @@ function showUsageTips() {
 }
 
 /**
- * 主配置函数
+ * 主配置函数（内部实现）
  */
-async function setupEnhanced() {
+async function setupEnhancedInternal() {
   try {
     // 显示欢迎消息
     showWelcome();
@@ -489,5 +490,15 @@ async function setupEnhanced() {
   }
 }
 
-// 运行配置向导
-setupEnhanced().catch(console.error);
+/**
+ * 导出配置向导函数，而不是立即执行
+ * 避免在 import 时就运行配置向导
+ */
+export function setupEnhanced() {
+  return setupEnhancedInternal();
+}
+
+// 如果直接运行此文件，则启动配置向导
+if (isMainModule(import.meta.url)) {
+  setupEnhanced().catch(console.error);
+}

@@ -200,9 +200,26 @@ export function loadProjectConfig(projectPath = null) {
 
   try {
     const configContent = fs.readFileSync(projectConfigPath, 'utf-8');
+    
+    // 使用 safeJSONParse，失败时直接退出
     const projectConfig = safeJSONParse(configContent, {
-      fallback: {}
+      fallback: null,
+      silent: true
     });
+
+    if (projectConfig === null) {
+      // 尝试直接解析以获取更好的错误信息
+      try {
+        JSON.parse(configContent);
+      } catch (parseError) {
+        console.error(`\n❌ [FATAL ERROR] Failed to parse project config file: ${projectConfigPath}`);
+        console.error(`\nJSON Parse Error: ${parseError.message}`);
+        console.error(`\nPlease fix the JSON syntax error in your config file.`);
+        console.error(`Common issues: missing commas, unmatched brackets, trailing commas.\n`);
+        process.exit(1);
+      }
+    }
+    
     const workingDir = projectPath || process.cwd();
     console.log(`[Config] Loaded project config from: ${projectConfigPath}`);
     console.log(`[Config] Project path: ${workingDir}`);
@@ -234,9 +251,27 @@ export function loadConfig(projectPath = null) {
     let globalConfig = {};
     if (fs.existsSync(CONFIG_FILE)) {
       const configContent = fs.readFileSync(CONFIG_FILE, 'utf-8');
-      globalConfig = safeJSONParse(configContent, {
-        fallback: {}
+      
+      // 使用 safeJSONParse，失败时直接退出
+      const parsedConfig = safeJSONParse(configContent, {
+        fallback: null,
+        silent: true
       });
+
+      if (parsedConfig === null) {
+        // 尝试直接解析以获取更好的错误信息
+        try {
+          JSON.parse(configContent);
+        } catch (parseError) {
+          console.error(`\n❌ [FATAL ERROR] Failed to parse global config file: ${CONFIG_FILE}`);
+          console.error(`\nJSON Parse Error: ${parseError.message}`);
+          console.error(`\nPlease fix the JSON syntax error in your config file.`);
+          console.error(`Common issues: missing commas, unmatched brackets, trailing commas.\n`);
+          process.exit(1);
+        }
+      }
+      
+      globalConfig = parsedConfig;
     }
 
     // 加载项目本地配置
@@ -263,7 +298,7 @@ export function hasConfig() {
     if (!fs.existsSync(CONFIG_FILE)) {
       return false;
     }
-    const config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
+    const config = safeJSONParse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
 
     // 检查是否有有效的 API Key
     const provider = config.ai?.provider || 'anthropic';
