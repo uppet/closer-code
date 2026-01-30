@@ -26,6 +26,8 @@
     "dev": "npm run build -- --watch",
     "test": "node src/test-modules.js",
     "test:mcp": "node test/test-mcp.js",
+    "test:ollama": "node test/test-ollama-connection.js",
+    "test:ollama:conv": "node test/test-ollama-conversation.js",
     "check": "node --check dist/index.js",
     "batch": "npm run build:batch && node dist/batch-cli.js"
   },
@@ -50,6 +52,7 @@
     "ink": "^4.4.1",
     "ink-text-input": "^5.0.1",
     "jsonrepair": "^3.13.2",
+    "ollama": "^0.6.3",
     "openai": "^6.16.0",
     "react": "^18.2.0",
     "uuid": "^13.0.0",

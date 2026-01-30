@@ -58,35 +58,53 @@ const FullscreenConversation = React.memo(function FullscreenConversation({ mess
     return 'red';
   };
 
-  // 将消息和工具执行按时间顺序混合
+  // 将消息和工具执行按时间顺序混合（交叉混排）
   const getMixedContent = () => {
     const content = [];
-
-    // 添加消息
-    messages.forEach((message, index) => {
+    
+    // 为消息添加排序时间戳（如果没有key，使用递减的时间戳）
+    const messagesWithTime = messages.map((msg, index) => ({
+      ...msg,
+      _sortTime: msg.key || (Date.now() - (messages.length - index) * 10000)
+    }));
+    
+    // 按照消息顺序遍历，并在合适的位置插入工具执行
+    let lastMsgIndex = 0;
+    messagesWithTime.forEach((message, msgIndex) => {
+      // 添加消息
       content.push({
         type: 'message',
         data: message,
-        key: message.key || `msg-${index}`,
-        timestamp: message.timestamp || index
+        key: message.key || `msg-${msgIndex}`,
+        timestamp: message._sortTime
       });
-    });
-
-    // 添加工具执行（仅在 showTools 为 true 时）
-    if (showTools) {
-      toolExecutions.forEach((tool, index) => {
-        content.push({
-          type: 'tool',
-          data: tool,
-          key: tool.id || `tool-${index}`,
-          timestamp: tool.id || Date.now() + index
+      
+      // 如果是助手消息，查找应该在这个消息之后的工具执行
+      if (message.role === 'assistant' && showTools) {
+        // 获取下一个消息的时间戳（如果有的话）
+        const nextMsgTime = messagesWithTime[msgIndex + 1]?._sortTime || Infinity;
+        
+        // 找到所有应该在这个消息之后的工具执行
+        // 条件：工具开始时间在当前消息之后，且在下一个消息之前
+        const relatedTools = toolExecutions.filter(tool => {
+          const toolTime = tool.startTime || tool.id || 0;
+          return toolTime > message._sortTime && toolTime < nextMsgTime;
         });
-      });
-    }
-
-    // 按时间戳排序（保持原有顺序，工具执行插入到对应位置）
-    // 由于消息没有精确时间戳，我们保持消息在前，工具在后的顺序
-    // 实际上工具执行是在 AI 响应过程中发生的，所以放在消息之后
+        
+        // 按工具开始时间排序并添加
+        relatedTools
+          .sort((a, b) => (a.startTime || a.id || 0) - (b.startTime || b.id || 0))
+          .forEach((tool, toolIdx) => {
+            content.push({
+              type: 'tool',
+              data: tool,
+              key: tool.id || `tool-${msgIndex}-${toolIdx}`,
+              timestamp: tool.startTime || tool.id || 0
+            });
+          });
+      }
+    });
+    
     return content;
   };
 

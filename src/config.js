@@ -302,7 +302,7 @@ export function hasConfig() {
 
     // 检查是否有有效的 API Key
     const provider = config.ai?.provider || 'anthropic';
-    const apiKey = config.ai?.[provider]?.apiKey;
+    const apiKey = (provider == 'ollama') || (config.ai?.[provider]?.apiKey);
 
     return !!apiKey;
   } catch (error) {
