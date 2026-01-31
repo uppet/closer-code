@@ -53,7 +53,8 @@ const DEFAULT_CONFIG = {
     confirmDestructive: true, // 危险操作需要确认
     maxRetries: 3,            // 失败重试次数
     timeout: 30000,           // 操作超时时间
-    workingDir: process.cwd() // 默认工作目录
+    workingDir: process.cwd(), // 默认工作目录
+    customSystemPrompt: null  // 自定义系统提示词（用于小模型或特殊需求）
   },
 
   // 工具配置

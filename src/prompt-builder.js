@@ -65,6 +65,24 @@ export async function getSystemPrompt(config, workflowTest = false, activeSkills
   const projectKey = config.behavior.workingDir || 'default';
   const projectInfo = memory.projects?.[projectKey];
 
+  // ✅ 检查是否有自定义系统提示词
+  if (config.behavior.customSystemPrompt) {
+    console.log('[Prompt] Using custom system prompt');
+    
+    // 如果自定义提示词是字符串，直接返回
+    if (typeof config.behavior.customSystemPrompt === 'string') {
+      return [{
+        type: 'text',
+        text: config.behavior.customSystemPrompt
+      }];
+    }
+    
+    // 如果是数组，直接返回
+    if (Array.isArray(config.behavior.customSystemPrompt)) {
+      return config.behavior.customSystemPrompt;
+    }
+  }
+
   // 读取全局和项目级 cloco.md
   const globalClocoContent = await readGlobalCloco();
   const projectClocoContent = await readProjectCloco();
