@@ -172,6 +172,7 @@ export class OllamaClient {
   async chat(messages, options = {}) {
     const system = options.system || 'You are a helpful AI programming assistant.';
     const temperature = options.temperature ?? 0.7;
+    const tools = options.tools || [];
 
     // 回声模式：直接返回用户输入
     if (this.echoMode) {
@@ -197,19 +198,31 @@ export class OllamaClient {
       return result;
     }
 
+    // 转换工具格式为 Ollama 格式
+    const ollamaTools = tools.map(tool => ({
+      type: 'function',
+      function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.input_schema
+      }
+    }));
+
     // 正常模式：连接 Ollama 服务器
     const formattedMessages = this._formatMessages(messages, system);
 
+    // ✅ 只调用一次 API，让上层对话系统处理工具调用循环
     try {
       console.error(`[Ollama Debug] Connecting to ${this.baseURL} with model ${this.model}...`);
       console.error(`[Ollama Debug] Messages count: ${formattedMessages.length}`);
-      console.error(`[Ollama Debug] Input messages:`, JSON.stringify(messages, null, 2));
+      console.error(`[Ollama Debug] Tools: ${ollamaTools.length}`);
 
       const client = await this._getClient();
 
       const response = await client.chat({
         model: this.model,
         messages: formattedMessages,
+        tools: ollamaTools.length > 0 ? ollamaTools : undefined,
         stream: false,
         options: {
           temperature: temperature,
@@ -217,24 +230,12 @@ export class OllamaClient {
         }
       });
 
-      console.error(`[Ollama Debug] Response received successfully`);
-      console.error(`[Ollama Debug] Response content:`, response.message.content);
+      console.error(`[Ollama Debug] Response received`);
+      console.error(`[Ollama Debug] Has content: ${!!response.message.content}`);
+      console.error(`[Ollama Debug] Has tool_calls: ${!!response.message.tool_calls}`);
 
-      // 返回标准格式（与 Anthropic 兼容）
-      const result = {
-        role: 'assistant',
-        content: [{ type: 'text', text: response.message.content }],
-        model: this.model
-      };
-
-      // 如果有 tool_calls，也返回（虽然 Ollama 可能不支持）
-      if (response.message.tool_calls) {
-        result.tool_calls = response.message.tool_calls;
-      }
-
-      console.error(`[Ollama Debug] Returning result:`, JSON.stringify(result, null, 2));
-
-      return result;
+      // ✅ 解析响应为统一格式（与 OpenAI/Anthropic 兼容）
+      return this._parseResponse(response);
     } catch (error) {
       console.error(`[Ollama Error] Type: ${error.name || 'Unknown'}`);
       console.error(`[Ollama Error] Message: ${error.message}`);
@@ -255,11 +256,56 @@ export class OllamaClient {
   }
 
   /**
+   * 解析 Ollama 响应为统一格式
+   * 与 OpenAI/Anthropic 客户端保持一致的接口
+   */
+  _parseResponse(response) {
+    const message = {
+      role: 'assistant',
+      content: [],
+      model: this.model
+    };
+
+    // 添加文本内容
+    if (response.message.content) {
+      message.content.push({
+        type: 'text',
+        text: response.message.content
+      });
+    }
+
+    // 添加 tool_calls（如果有）
+    if (response.message.tool_calls && response.message.tool_calls.length > 0) {
+      for (const toolCall of response.message.tool_calls) {
+        const input = safeJSONParse(toolCall.function.arguments, {
+          fallback: {}
+        });
+        message.content.push({
+          type: 'tool_use',
+          id: toolCall.id,
+          name: toolCall.function.name,
+          input
+        });
+      }
+    }
+
+    return message;
+  }
+
+  /**
    * 发送消息（流式）
    */
   async chatStream(messages, options = {}, onChunk) {
     const system = options.system || 'You are a helpful AI programming assistant.';
     const temperature = options.temperature ?? 0.7;
+    const tools = options.tools || [];
+
+    // 如果有工具定义，使用非流式调用（通过 chat() 方法）
+    // chat() 方法已经支持工具调用循环
+    if (tools.length > 0 && !this.echoMode) {
+      console.error(`[Ollama Debug] chatStream: Using non-streaming mode for tool support (${tools.length} tools)`);
+      return this.chat(messages, options);
+    }
 
     // 回声模式：模拟流式返回
     if (this.echoMode) {
@@ -305,15 +351,27 @@ export class OllamaClient {
     // 正常模式：连接 Ollama 服务器
     const formattedMessages = this._formatMessages(messages, system);
 
+    // 转换工具格式
+    const ollamaTools = tools.map(tool => ({
+      type: 'function',
+      function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.input_schema
+      }
+    }));
+
     try {
       console.error(`[Ollama Debug] Starting stream to ${this.baseURL} with model ${this.model}...`);
       console.error(`[Ollama Debug] Stream messages count: ${formattedMessages.length}`);
+      console.error(`[Ollama Debug] Tools: ${ollamaTools.length}`);
 
       const client = await this._getClient();
 
       const stream = await client.chat({
         model: this.model,
         messages: formattedMessages,
+        tools: ollamaTools.length > 0 ? ollamaTools : undefined,
         stream: true,
         options: {
           temperature: temperature,
@@ -454,21 +512,25 @@ export class OllamaClient {
 
             if (tool) {
               try {
-                const args = JSON.parse(toolCall.function.arguments);
+                const args = toolCall.function.arguments;// JSON.parse(toolCall.function.arguments);
                 const result = await tool.run(args);
 
-                // 将工具结果作为用户消息添加（Ollama 格式）
+                // 使用 'tool' 角色添加工具结果（Ollama 官方格式）
                 currentMessages.push({
-                  role: 'user',
-                  content: `Tool ${toolCall.function.name} result: ${JSON.stringify(result)}`
+                  role: 'tool',
+                  content: JSON.stringify(result),
+                  tool_name: toolCall.function.name
                 });
+
+                console.error(`[Ollama Debug] Tool ${toolCall.function.name} result:`, JSON.stringify(result).substring(0, 100));
               } catch (error) {
                 console.error(`[Ollama Tool Error] ${toolCall.function.name}:`, error.message);
 
-                // 将错误结果作为用户消息添加
+                // 使用 'tool' 角色添加错误结果
                 currentMessages.push({
-                  role: 'user',
-                  content: `Tool ${toolCall.function.name} error: ${error.message}`
+                  role: 'tool',
+                  content: JSON.stringify({ error: error.message }),
+                  tool_name: toolCall.function.name
                 });
               }
             } else {
@@ -522,13 +584,40 @@ export class OllamaClient {
         ? system.map(block => block.type === 'text' ? block.text : '').join('\n')
         : system;
       
-      formatted.push({ role: 'system', content: systemContent });
+      // "you can use tools call to perform action. if tool fail and you have idea to recover yourself. do it without asking" 
+      formatted.push({ role: 'system', content: systemContent}); // 
     }
 
     for (const message of messages) {
-      // 跳过包含 tool_calls 的消息（Ollama 不支持）
+      // 处理包含 tool_calls 的 assistant 消息
       if (message.tool_calls && message.tool_calls.length > 0) {
-        console.error(`[Ollama Debug] Skipping message with tool_calls (not supported)`);
+        console.error(`[Ollama Debug] Processing message with tool_calls`);
+
+        // 提取文本内容
+        let textContent = '';
+        if (Array.isArray(message.content)) {
+          const textBlocks = message.content.filter(block => block.type === 'text');
+          textContent = textBlocks.map(block => block.text).join('\n');
+        } else if (typeof message.content === 'string') {
+          textContent = message.content;
+        }
+
+        // 转换 tool_calls 为 Ollama 格式
+        const ollamaToolCalls = message.tool_calls.map(tc => ({
+          id: tc.id,
+          type: 'function',
+          function: {
+            name: tc.name,
+            arguments: JSON.stringify(tc.input || {})
+          }
+        }));
+
+        // 添加 assistant 消息（包含 tool_calls）
+        formatted.push({
+          role: message.role,
+          content: textContent,
+          tool_calls: ollamaToolCalls
+        });
         continue;
       }
 
@@ -538,37 +627,32 @@ export class OllamaClient {
         const toolResultBlocks = message.content.filter(block => block.type === 'tool_result');
         const toolUseBlocks = message.content.filter(block => block.type === 'tool_use');
 
-        // 合并所有文本内容
-        const allTexts = [];
-
-        if (textBlocks.length > 0) {
-          allTexts.push(textBlocks.map(block => block.text).join('\n'));
-        }
-
-        // 处理工具使用（作为文本说明）
-        if (toolUseBlocks.length > 0) {
-          for (const block of toolUseBlocks) {
-            allTexts.push(`[Tool: ${block.name}]`);
-          }
-        }
-
-        // 处理工具结果（作为文本）
+        // 处理工具结果（Ollama 格式：role: 'tool'）
         if (toolResultBlocks.length > 0) {
           for (const block of toolResultBlocks) {
-            const resultText = typeof block.content === 'string' 
-              ? block.content 
+            const resultText = typeof block.content === 'string'
+              ? block.content
               : JSON.stringify(block.content);
-            allTexts.push(`[Tool Result: ${resultText}]`);
+
+            formatted.push({
+              role: 'tool',
+              content: resultText,
+              tool_name: block.tool_use_id  // 可选，但推荐
+            });
           }
         }
 
-        // 添加合并后的消息
-        if (allTexts.length > 0) {
+        // 处理文本内容
+        if (textBlocks.length > 0) {
+          const textContent = textBlocks.map(block => block.text).join('\n');
           formatted.push({
             role: message.role,
-            content: allTexts.join('\n\n')
+            content: textContent
           });
         }
+
+        // tool_use 块已经被上面的 tool_calls 逻辑处理
+        // 这里忽略，避免重复
       } else {
         // 简单字符串格式
         formatted.push({
