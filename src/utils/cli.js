@@ -21,6 +21,7 @@ export function parseOptions(argv) {
     test: false,              // 测试模式 (-t, --test)
     json: false,
     file: null,
+    config: null,             // 自定义配置文件路径 (-c, --config)
     verbose: false,
     debug: false,
     all: false,               // 运行所有 workflow 测试
@@ -49,6 +50,8 @@ export function parseOptions(argv) {
       options.json = true;
     } else if (arg === '-f' || arg === '--file') {
       options.file = argv[++i] || null;
+    } else if (arg === '-c' || arg === '--config') {
+      options.config = argv[++i] || null;
     } else if (arg === '--verbose') {
       options.verbose = true;
     } else if (arg === '-d' || arg === '--debug') {

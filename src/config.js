@@ -11,6 +11,25 @@ const HISTORY_DIR = path.join(CONFIG_DIR, 'history'); // 改为目录
 const HISTORY_FILE = path.join(CONFIG_DIR, 'history.json'); // 保留用于兼容
 const MEMORY_FILE = path.join(CONFIG_DIR, 'memory.json');
 
+// 全局变量：存储自定义配置文件路径
+let customConfigPath = null;
+
+/**
+ * 设置自定义配置文件路径
+ * @param {string} configPath - 配置文件路径
+ */
+export function setCustomConfigPath(configPath) {
+  customConfigPath = configPath;
+}
+
+/**
+ * 获取自定义配置文件路径
+ * @returns {string|null} 配置文件路径
+ */
+export function getCustomConfigPath() {
+  return customConfigPath;
+}
+
 // 项目本地配置文件名
 const PROJECT_CONFIG_FILES = [
   '.closer-code.json',
@@ -245,45 +264,98 @@ function mergeConfigs(defaultConfig, globalConfig, projectConfig) {
   return deepMerge(merged, projectConfig);
 }
 
-// 加载配置
-export function loadConfig(projectPath = null) {
+/**
+ * 加载自定义配置文件
+ * @param {string} configPath - 自定义配置文件路径
+ * @returns {Object} 配置对象
+ */
+function loadCustomConfig(configPath) {
   try {
-    // 加载全局配置
-    let globalConfig = {};
-    if (fs.existsSync(CONFIG_FILE)) {
-      const configContent = fs.readFileSync(CONFIG_FILE, 'utf-8');
-      
-      // 使用 safeJSONParse，失败时直接退出
-      const parsedConfig = safeJSONParse(configContent, {
-        fallback: null,
-        silent: true
-      });
+    // 解析路径（支持相对路径和绝对路径）
+    const resolvedPath = path.resolve(configPath);
 
-      if (parsedConfig === null) {
-        // 尝试直接解析以获取更好的错误信息
-        try {
-          JSON.parse(configContent);
-        } catch (parseError) {
-          console.error(`\n❌ [FATAL ERROR] Failed to parse global config file: ${CONFIG_FILE}`);
-          console.error(`\nJSON Parse Error: ${parseError.message}`);
-          console.error(`\nPlease fix the JSON syntax error in your config file.`);
-          console.error(`Common issues: missing commas, unmatched brackets, trailing commas.\n`);
-          process.exit(1);
-        }
+    if (!fs.existsSync(resolvedPath)) {
+      console.error(`\n❌ [FATAL ERROR] Custom config file not found: ${resolvedPath}`);
+      console.error(`\nPlease check the file path and try again.\n`);
+      process.exit(1);
+    }
+
+    const configContent = fs.readFileSync(resolvedPath, 'utf-8');
+
+    // 使用 safeJSONParse，失败时直接退出
+    const customConfig = safeJSONParse(configContent, {
+      fallback: null,
+      silent: true
+    });
+
+    if (customConfig === null) {
+      // 尝试直接解析以获取更好的错误信息
+      try {
+        JSON.parse(configContent);
+      } catch (parseError) {
+        console.error(`\n❌ [FATAL ERROR] Failed to parse custom config file: ${resolvedPath}`);
+        console.error(`\nJSON Parse Error: ${parseError.message}`);
+        console.error(`\nPlease fix the JSON syntax error in your config file.`);
+        console.error(`Common issues: missing commas, unmatched brackets, trailing commas.\n`);
+        process.exit(1);
       }
-      
-      globalConfig = parsedConfig;
+    }
+
+    console.log(`[Config] Loaded custom config from: ${resolvedPath}`);
+    return customConfig;
+  } catch (error) {
+    console.error(`\n❌ [FATAL ERROR] Failed to load custom config: ${error.message}\n`);
+    process.exit(1);
+  }
+}
+
+// 加载配置
+export function loadConfig(projectPath = null, customConfigPath = null) {
+  try {
+    // 如果指定了自定义配置文件，使用自定义配置作为基础
+    let baseConfig = DEFAULT_CONFIG;
+    let globalConfig = {};
+
+    if (customConfigPath) {
+      // 加载自定义配置文件
+      globalConfig = loadCustomConfig(customConfigPath);
+    } else {
+      // 加载全局配置
+      if (fs.existsSync(CONFIG_FILE)) {
+        const configContent = fs.readFileSync(CONFIG_FILE, 'utf-8');
+
+        // 使用 safeJSONParse，失败时直接退出
+        const parsedConfig = safeJSONParse(configContent, {
+          fallback: null,
+          silent: true
+        });
+
+        if (parsedConfig === null) {
+          // 尝试直接解析以获取更好的错误信息
+          try {
+            JSON.parse(configContent);
+          } catch (parseError) {
+            console.error(`\n❌ [FATAL ERROR] Failed to parse global config file: ${CONFIG_FILE}`);
+            console.error(`\nJSON Parse Error: ${parseError.message}`);
+            console.error(`\nPlease fix the JSON syntax error in your config file.`);
+            console.error(`Common issues: missing commas, unmatched brackets, trailing commas.\n`);
+            process.exit(1);
+          }
+        }
+
+        globalConfig = parsedConfig;
+      }
     }
 
     // 加载项目本地配置
     const projectConfig = loadProjectConfig(projectPath);
 
-    // 合并配置
+    // 合并配置：项目本地 > 全局/自定义 > 默认
     const finalConfig = mergeConfigs(DEFAULT_CONFIG, globalConfig, projectConfig);
 
     // 如果加载了项目配置，显示信息
     if (Object.keys(projectConfig).length > 0) {
-      console.log(`[Config] Using merged config (project + global)`);
+      console.log(`[Config] Using merged config (project + ${customConfigPath ? 'custom' : 'global'})`);
     }
 
     return finalConfig;
@@ -542,7 +614,7 @@ export function saveMemory(memory) {
 
 // 获取当前配置
 export function getConfig() {
-  return loadConfig();
+  return loadConfig(null, customConfigPath);
 }
 
 // 更新配置

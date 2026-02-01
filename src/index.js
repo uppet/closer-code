@@ -45,6 +45,12 @@ function handleError(error) {
 async function main() {
   const { options, args, specialCommand } = parseOptions(process.argv.slice(2));
 
+  // 设置自定义配置文件路径（如果指定）
+  if (options.config) {
+    const { setCustomConfigPath } = await import('./config.js');
+    setCustomConfigPath(options.config);
+  }
+
   // 处理特殊命令
   if (specialCommand === 'help' || options.help) {
     await showHelp();
