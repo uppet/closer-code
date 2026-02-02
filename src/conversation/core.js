@@ -26,6 +26,7 @@ import { StreamHandler } from './stream-handler.js';
 import { MCPIntegration } from './mcp-integration.js';
 import { PlanManager } from './plan-manager.js';
 import { ToolExecutor } from './tool-executor.js';
+import { ContextManager } from './context-manager.js';
 
 // 消息类型
 export const MessageType = {
@@ -91,6 +92,7 @@ export class Conversation {
     this.mcpIntegration = new MCPIntegration(config);
     this.planManager = new PlanManager(this);
     this.toolExecutor = new ToolExecutor(this, this.planManager);
+    this.contextManager = new ContextManager(this, config);
 
     // 初始化工具执行器上下文
     setToolExecutorContext(config);
@@ -255,11 +257,44 @@ export class Conversation {
       // 记录用户消息
       await logUserMessage(userMessage);
 
-      // 添加用户消息
-      this.messages.push({
-        role: MessageType.USER,
-        content: userMessage
-      });
+      // 检查 context（在添加用户消息之前）
+      const contextCheck = await this.contextManager.checkBeforeSend(userMessage);
+      
+      if (contextCheck.action === 'reset') {
+        // 任务需要重开，先重开再添加用户消息
+        console.log('[Conversation] Task reset needed, resetting before adding user message...');
+        
+        // 执行重开（不包含当前用户消息）
+        await this.contextManager.resetTaskInternal(contextCheck.usageInfo);
+        
+        // 现在添加用户消息
+        this.messages.push({
+          role: MessageType.USER,
+          content: userMessage
+        });
+        
+        console.log('[Conversation] User message added after reset, continuing...');
+      } else if (contextCheck.action === 'compressed') {
+        // 需要压缩历史
+        console.log('[Conversation] Compression needed, compressing before adding user message...');
+        
+        // 执行压缩
+        await this.contextManager.compressHistory(contextCheck.usageInfo);
+        
+        // 添加用户消息
+        this.messages.push({
+          role: MessageType.USER,
+          content: userMessage
+        });
+        
+        console.log('[Conversation] User message added after compression, continuing...');
+      } else {
+        // 正常情况，直接添加用户消息
+        this.messages.push({
+          role: MessageType.USER,
+          content: userMessage
+        });
+      }
 
       // 获取 AI 客户端
       const aiClient = await createAIClient(this.config);
@@ -361,6 +396,24 @@ export class Conversation {
         return this.abortFence.createAbortResult('aborted_by_user');
       }
 
+      // 检查是否是 context overflow 错误，尝试学习限制值
+      const isContextOverflow = this.contextManager.handleAPIError(error);
+      if (isContextOverflow) {
+        console.log('[Conversation] Context overflow detected, limit learned. Retrying...');
+        
+        // 尝试压缩历史并重试
+        try {
+          const compressResult = await this.contextManager.manualCompress();
+          console.log(`[Conversation] Compressed history before retry: ${compressResult.summary}`);
+          
+          // 这里不自动重试，让用户知道发生了什么
+          throw new Error(`Context overflow detected and learned. History has been compressed. Please try again.`);
+        } catch (compressError) {
+          console.error('[Conversation] Failed to compress after context overflow:', compressError.message);
+          throw error;
+        }
+      }
+
       // 其他错误正常抛出
       await logAIError(error);
       throw error;
@@ -368,6 +421,41 @@ export class Conversation {
       this.isProcessing = false;
       this.abortFence.unregisterAbortHandler('network');
     }
+  }
+
+  /**
+   * 获取消息历史
+   */
+  getMessages() {
+    return this.messages;
+  }
+
+  /**
+   * 设置消息历史
+   */
+  setMessages(messages) {
+    this.messages = messages;
+  }
+
+  /**
+   * 添加消息到历史
+   */
+  addMessage(message) {
+    this.messages.push(message);
+  }
+
+  /**
+   * 手动触发压缩
+   */
+  async manualCompress(strategy = null) {
+    return await this.contextManager.manualCompress(strategy);
+  }
+
+  /**
+   * 获取 Context 管理器统计
+   */
+  getContextStats() {
+    return this.contextManager.getStats();
   }
 
   /**
@@ -576,6 +664,18 @@ You can now use the capabilities described in this skill to help the user.`;
           }
         } catch (error) {
           console.error('[Cleanup] Plan manager cleanup error:', error.message);
+        }
+      }
+
+      // 8. 清理 Context 管理器
+      if (this.contextManager) {
+        try {
+          if (typeof this.contextManager.resetStats === 'function') {
+            this.contextManager.resetStats();
+            console.log('[Cleanup] ✓ Context 管理器已清理');
+          }
+        } catch (error) {
+          console.error('[Cleanup] Context manager cleanup error:', error.message);
         }
       }
 
