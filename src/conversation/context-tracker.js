@@ -48,6 +48,7 @@ export class ContextTracker {
 
     // 缓存 token 计算结果（避免重复计算）
     this.tokenCache = new Map();
+    this.cacheAccessOrder = []; // 记录访问顺序，用于 LRU
     this.cacheHits = 0;
     this.cacheMisses = 0;
   }
@@ -78,6 +79,13 @@ export class ContextTracker {
     // 生成缓存键
     const cacheKey = this._generateCacheKey(messages);
     if (useCache && this.tokenCache.has(cacheKey)) {
+      // 更新访问顺序（LRU）
+      const idx = this.cacheAccessOrder.indexOf(cacheKey);
+      if (idx > -1) {
+        this.cacheAccessOrder.splice(idx, 1);
+      }
+      this.cacheAccessOrder.push(cacheKey);
+      
       this.cacheHits++;
       return this.tokenCache.get(cacheKey);
     }
@@ -98,11 +106,12 @@ export class ContextTracker {
       // 缓存结果
       if (useCache) {
         this.tokenCache.set(cacheKey, tokenCount);
+        this.cacheAccessOrder.push(cacheKey);
 
-        // 限制缓存大小（最多保留 100 个）
+        // LRU: 删除最久未使用的
         if (this.tokenCache.size > 100) {
-          const firstKey = this.tokenCache.keys().next().value;
-          this.tokenCache.delete(firstKey);
+          const lruKey = this.cacheAccessOrder.shift();
+          this.tokenCache.delete(lruKey);
         }
       }
 
@@ -175,6 +184,7 @@ export class ContextTracker {
    */
   clearCache() {
     this.tokenCache.clear();
+    this.cacheAccessOrder = [];
     this.cacheHits = 0;
     this.cacheMisses = 0;
   }
@@ -196,7 +206,7 @@ export class ContextTracker {
   // ========== 私有方法 ==========
 
   /**
-   * 生成缓存键（改进版，使用 SHA-256）
+   * 生成缓存键（改进版，使用双哈希降低冲突概率）
    */
   _generateCacheKey(messages) {
     // 使用简单的哈希算法（兼容 ES 模块）
@@ -207,16 +217,21 @@ export class ContextTracker {
       content: m.content
     })).join('|||');
     
-    // 使用简单的字符串哈希（FNV-1a 算法）
-    let hash = 2166136261;
+    // 使用双哈希降低冲突概率
+    let hash1 = 2166136261; // FNV-1a prime 1
+    let hash2 = 314159265;  // FNV-1a prime 2
+    
     for (let i = 0; i < content.length; i++) {
-      hash ^= content.charCodeAt(i);
-      hash = Math.imul(hash, 16777619);
+      const char = content.charCodeAt(i);
+      hash1 = Math.imul(hash1 ^ char, 16777619);
+      hash2 = Math.imul(hash2 ^ char, 2654435761);
     }
     
-    // 转换为 32 位 hex 字符串
-    return (hash >>> 0).toString(16).padStart(8, '0') + 
-           Math.abs(hash).toString(16).slice(0, 24);
+    // 组合两个哈希值（64 位 hex 字符串）
+    const part1 = (hash1 >>> 0).toString(16).padStart(8, '0');
+    const part2 = (hash2 >>> 0).toString(16).padStart(8, '0');
+    
+    return part1 + part2;
   }
 
   /**

@@ -218,34 +218,42 @@ export class ContextManager {
    */
   async resetTaskInternal(usageInfo) {
     const messages = this.conversation.getMessages();
+    const originalMessages = [...messages]; // 备份
     const originalCount = messages.length;
 
     console.log(`[ContextManager] Resetting task (internal) with ${originalCount} messages`);
 
-    // 压缩历史到最小（保留最近 20 条消息）
-    const compressionResult = applyCompression(messages, 'keepRecent', { count: 20 });
+    try {
+      // 压缩历史到最小（保留最近 20 条消息）
+      const compressionResult = applyCompression(messages, 'keepRecent', { count: 20 });
 
-    // 更新对话历史
-    this.conversation.setMessages(compressionResult.messages);
+      // 更新对话历史
+      this.conversation.setMessages(compressionResult.messages);
 
-    // 保存压缩后的历史
-    if (!this.conversation.testMode) {
-      const { saveHistory } = await import('../config.js');
-      saveHistory(compressionResult.messages);
-      console.log('[ContextManager] Reset history saved');
+      // 保存压缩后的历史
+      if (!this.conversation.testMode) {
+        const { saveHistory } = await import('../config.js');
+        saveHistory(compressionResult.messages);
+        console.log('[ContextManager] Reset history saved');
+      }
+
+      // 更新统计
+      this.stats.resetCount++;
+
+      console.log(`[ContextManager] Task reset complete: kept ${compressionResult.newCount} recent messages`);
+
+      return {
+        action: 'reset',
+        kept: compressionResult.newCount,
+        removed: originalCount - compressionResult.newCount,
+        usageInfo
+      };
+    } catch (error) {
+      // 回滚到原始消息
+      this.conversation.setMessages(originalMessages);
+      console.error('[ContextManager] Reset failed, rolled back:', error.message);
+      throw error;
     }
-
-    // 更新统计
-    this.stats.resetCount++;
-
-    console.log(`[ContextManager] Task reset complete: kept ${compressionResult.newCount} recent messages`);
-
-    return {
-      action: 'reset',
-      kept: compressionResult.newCount,
-      removed: originalCount - compressionResult.newCount,
-      usageInfo
-    };
   }
 
   /**
@@ -301,17 +309,28 @@ export class ContextManager {
    * @returns {Promise<Object>} 摘要对象
    */
   async generateTaskSummary(messages, currentTask = null) {
-    // 提取关键信息
-    const keyInfo = this.extractKeyInformation(messages);
+    try {
+      // 提取关键信息
+      const keyInfo = this.extractKeyInformation(messages);
 
-    // 生成摘要文本
-    const summary = {
-      text: `【任务摘要】\n\n${keyInfo}\n\n【当前状态】\n准备继续处理新的请求。`,
-      keyPoints: keyInfo,
-      messageCount: messages.length
-    };
+      // 生成摘要文本
+      const summary = {
+        text: `【任务摘要】\n\n${keyInfo}\n\n【当前状态】\n准备继续处理新的请求。`,
+        keyPoints: keyInfo,
+        messageCount: messages.length
+      };
 
-    return summary;
+      return summary;
+    } catch (error) {
+      console.warn('[ContextManager] Failed to generate task summary, using fallback:', error.message);
+      
+      // 降级到简单摘要
+      return {
+        text: '任务已重开，准备继续处理新的请求。',
+        keyPoints: '',
+        messageCount: messages.length
+      };
+    }
   }
 
   /**
@@ -390,36 +409,44 @@ Token 使用: ${usageInfo.percentageDisplay}
    */
   async manualCompress(strategy = null) {
     const messages = this.conversation.getMessages();
+    const originalMessages = [...messages]; // 备份
     const currentTokens = await this.tracker.estimateTokens(messages);
     const usageInfo = this.tracker.getUsageInfo(currentTokens);
 
-    const compressionStrategy = strategy || this.compressionStrategy;
-    const result = applyCompression(messages, compressionStrategy, this.compressionOptions);
+    try {
+      const compressionStrategy = strategy || this.compressionStrategy;
+      const result = applyCompression(messages, compressionStrategy, this.compressionOptions);
 
-    this.conversation.setMessages(result.messages);
+      this.conversation.setMessages(result.messages);
 
-    // 保存压缩后的历史
-    if (!this.conversation.testMode) {
-      const { saveHistory } = await import('../config.js');
-      saveHistory(result.messages);
+      // 保存压缩后的历史
+      if (!this.conversation.testMode) {
+        const { saveHistory } = await import('../config.js');
+        saveHistory(result.messages);
+      }
+
+      // 重新计算压缩后的 token
+      const compressedTokens = await this.tracker.estimateTokens(result.messages);
+      const tokensSaved = currentTokens - compressedTokens;
+
+      this.stats.compressionCount++;
+      this.stats.totalTokensSaved += tokensSaved;
+
+      return {
+        action: 'compressed',
+        summary: result.summary,
+        originalCount: result.originalCount,
+        newCount: result.newCount,
+        tokensSaved,
+        strategy: compressionStrategy,
+        usageInfo
+      };
+    } catch (error) {
+      // 回滚到原始消息
+      this.conversation.setMessages(originalMessages);
+      console.error('[ContextManager] Manual compression failed, rolled back:', error.message);
+      throw error;
     }
-
-    // 重新计算压缩后的 token
-    const compressedTokens = await this.tracker.estimateTokens(result.messages);
-    const tokensSaved = currentTokens - compressedTokens;
-
-    this.stats.compressionCount++;
-    this.stats.totalTokensSaved += tokensSaved;
-
-    return {
-      action: 'compressed',
-      summary: result.summary,
-      originalCount: result.originalCount,
-      newCount: result.newCount,
-      tokensSaved,
-      strategy: compressionStrategy,
-      usageInfo
-    };
   }
 
   /**

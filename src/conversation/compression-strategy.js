@@ -188,12 +188,64 @@ export class SmartTokenStrategy extends CompressionStrategy {
     super(options);
     this.maxTokens = options.maxTokens || 100000;
     this.targetTokens = options.targetTokens || 80000; // 目标 token 数（留有余量）
-    this.tokenEstimator = options.tokenEstimator || ((msg) => {
-      // 默认的 token 估算器
-      const content = msg.content || '';
-      const length = typeof content === 'string' ? content.length : JSON.stringify(content).length;
-      return Math.ceil(length / 4); // 粗略估算：4 字符 ≈ 1 token
-    });
+    
+    // 使用更精确的 token 估算器（与 ContextTracker 一致）
+    this.tokenEstimator = options.tokenEstimator || this._defaultTokenEstimator.bind(this);
+  }
+
+  /**
+   * 默认的 token 估算器（与 ContextTracker 一致）
+   */
+  _defaultTokenEstimator(message) {
+    const content = message.content || '';
+    
+    if (typeof content === 'string') {
+      return this._estimateStringTokens(content);
+    } else if (Array.isArray(content)) {
+      // 处理数组内容（例如 tool use）
+      let totalTokens = 0;
+      for (const block of content) {
+        if (block.type === 'text') {
+          totalTokens += this._estimateStringTokens(block.text || '');
+        } else if (block.type === 'tool_use') {
+          // tool_use 的 token 估算
+          const toolNameTokens = 10;
+          let inputTokens;
+          if (block.input && typeof block.input === 'object') {
+            inputTokens = this._estimateStringTokens(JSON.stringify(block.input), 'json');
+          } else {
+            inputTokens = this._estimateStringTokens(String(block.input || ''), 'text');
+          }
+          totalTokens += toolNameTokens + inputTokens + 20;
+        }
+      }
+      return totalTokens;
+    } else if (typeof content === 'object') {
+      return this._estimateStringTokens(JSON.stringify(content), 'json');
+    }
+    
+    return 0;
+  }
+
+  /**
+   * 估算字符串的 token 数（与 ContextTracker 一致）
+   */
+  _estimateStringTokens(text, contentType = 'text') {
+    if (!text) return 0;
+
+    // 根据内容类型使用不同的估算策略
+    if (contentType === 'code') {
+      // 代码：通常 1 字符 ≈ 0.3-0.5 tokens
+      return Math.ceil(text.length * 0.4);
+    } else if (contentType === 'json') {
+      // JSON：结构化数据，约 1 字符 ≈ 0.35 tokens
+      return Math.ceil(text.length * 0.35);
+    } else {
+      // 普通文本
+      const chineseChars = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
+      const englishChars = text.length - chineseChars;
+      return Math.ceil(chineseChars * 2.5 + englishChars * 0.25);
+    }
   }
 
   apply(messages) {
