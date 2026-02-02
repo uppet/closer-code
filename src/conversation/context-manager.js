@@ -128,28 +128,42 @@ export class ContextManager {
    */
   handleAPIError(error) {
     const errorMessage = error.message || error.toString();
-    
+
     // 检查是否是 context overflow 错误
     const isContextOverflow = /context.*exceed|maximum.*context|too.*long/i.test(errorMessage);
-    
+
     if (isContextOverflow) {
       console.log('[ContextManager] Detected context overflow error');
-      
+
       // 尝试从错误中学习限制值
       const model = this.config.ai?.anthropic?.model || this.config.ai?.openai?.model || 'unknown';
       const learned = this.limitManager.learnFromError(error, model);
-      
+
       if (learned) {
         const newLimit = this.limitManager.getLimit(model);
-        console.log(`[ContextManager] Learned new context limit for ${model}: ${newLimit} tokens`);
-        
-        // 更新 tracker 的限制值
+
+        // 验证限制值是否合理
+        if (newLimit < 1000) {
+          console.warn(`[ContextManager] Learned limit too small (${newLimit}), ignoring`);
+          return false;
+        }
+
+        if (newLimit > 1000000) {
+          console.warn(`[ContextManager] Learned limit too large (${newLimit}), ignoring`);
+          return false;
+        }
+
+        const oldLimit = this.tracker.maxTokens;
         this.tracker.maxTokens = newLimit;
-        
+
+        // 通知用户
+        console.log(`[ContextManager] Updated context limit: ${oldLimit} → ${newLimit} tokens`);
+        console.warn(`[ContextManager] Context limit for ${model} has been updated based on API errors`);
+
         return true;
       }
     }
-    
+
     return false;
   }
 
@@ -265,40 +279,54 @@ export class ContextManager {
    */
   async resetTask(userMessage, usageInfo) {
     const messages = this.conversation.getMessages();
+    const originalMessages = [...messages]; // 备份
     const originalCount = messages.length;
 
     console.log(`[ContextManager] Resetting task with ${originalCount} messages using behavior: ${this.resetBehavior}`);
 
-    // 生成任务摘要
-    const summary = await this.generateTaskSummary(messages, userMessage);
+    try {
+      // 生成任务摘要
+      const summary = await this.generateTaskSummary(messages, userMessage);
 
-    // 压缩历史到最小（保留最近 20 条消息）
-    const compressionResult = applyCompression(messages, 'keepRecent', { count: 20 });
+      // 压缩历史到最小（保留最近 20 条消息）
+      const compressionResult = applyCompression(messages, 'keepRecent', { count: 20 });
 
-    // 更新对话历史
-    this.conversation.setMessages(compressionResult.messages);
+      // 更新对话历史
+      this.conversation.setMessages(compressionResult.messages);
 
-    // 添加系统消息说明重开
-    const resetMessage = {
-      role: 'system',
-      content: this._formatResetMessage(summary, compressionResult, usageInfo)
-    };
+      // 添加系统消息说明重开
+      const resetMessage = {
+        role: 'system',
+        content: this._formatResetMessage(summary, compressionResult, usageInfo)
+      };
 
-    this.conversation.addMessage(resetMessage);
+      this.conversation.addMessage(resetMessage);
 
-    // 更新统计
-    this.stats.resetCount++;
+      // 保存压缩后的历史
+      if (!this.conversation.testMode) {
+        const { saveHistory } = await import('../config.js');
+        saveHistory(this.conversation.getMessages());
+      }
 
-    console.log(`[ContextManager] Task reset complete: kept ${compressionResult.newCount} recent messages`);
+      // 更新统计
+      this.stats.resetCount++;
 
-    return {
-      action: 'reset',
-      summary: summary.text,
-      kept: compressionResult.newCount,
-      removed: originalCount - compressionResult.newCount,
-      behavior: this.resetBehavior,
-      usageInfo
-    };
+      console.log(`[ContextManager] Task reset complete: kept ${compressionResult.newCount} recent messages`);
+
+      return {
+        action: 'reset',
+        summary: summary.text,
+        kept: compressionResult.newCount,
+        removed: originalCount - compressionResult.newCount,
+        behavior: this.resetBehavior,
+        usageInfo
+      };
+    } catch (error) {
+      // 回滚到原始消息
+      this.conversation.setMessages(originalMessages);
+      console.error('[ContextManager] Reset failed, rolled back:', error.message);
+      throw error;
+    }
   }
 
   /**
