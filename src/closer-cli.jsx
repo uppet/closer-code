@@ -1007,6 +1007,34 @@ Type your message or command to get started.`
         setActivity(null);
         break;
 
+      case '/stats': {
+        setActivity('📊 获取 Context 统计信息...');
+        const contextStats = conversation.getContextStats();
+        
+        // 格式化统计信息
+        const statsContent = `📊 Context 压缩统计信息
+
+压缩统计:
+• 压缩次数: ${contextStats.compressionCount || 0}
+• 重开次数: ${contextStats.resetCount || 0}
+• 节省 tokens: ${contextStats.totalTokensSaved?.toLocaleString() || 0}
+
+缓存统计:
+• 缓存大小: ${contextStats.cacheStats?.size || 0}
+• 缓存命中: ${contextStats.cacheStats?.hits || 0}
+• 缓存未命中: ${contextStats.cacheStats?.misses || 0}
+• 缓存命中率: ${((contextStats.cacheStats?.hitRate || 0) * 100).toFixed(1)}%
+
+${contextStats.compressionCount > 0 ? '✅ 本次会话已进行过压缩' : 'ℹ️  本次会话尚未进行过压缩'}`;
+
+        setMessages(prev => [...prev, {
+          role: 'system',
+          content: statsContent
+        }]);
+        setActivity(null);
+        break;
+      }
+
       case '/export':
         if (args.length === 0) {
           setMessages(prev => [...prev, {
@@ -1045,6 +1073,7 @@ Type your message or command to get started.`
 /plan <task> - Create and execute a task plan
 /learn - Learn project patterns
 /status - Show conversation summary
+/stats - Show context compression statistics
 /history - Show input history statistics
 /keys - Show keyboard shortcuts reference
 /config - Show current configuration
