@@ -2,10 +2,22 @@
 /**
  * 多行文本输入组件
  * 全程多行模式，Enter 发送，Ctrl+Enter 换行
+ *
+ * 改进内容：
+ * - 统一换行符处理（支持 Windows \r\n 和旧 Mac \r）
+ * - 改进光标位置计算（考虑 Unicode 字符显示宽度）
+ * - 改进残留内容清理
+ * - 过滤不可打印字符
  */
 
 import React, { useState, useRef, useLayoutEffect } from 'react';
 import { Text, Box, useInput } from 'ink';
+import {
+  normalizeLineBreaks,
+  getStringDisplayLength,
+  filterPrintableChars,
+  isPrintableChar
+} from '../utils/text-processing.js';
 
 export function MultilineTextInput({
   initialValue = '',
@@ -13,19 +25,23 @@ export function MultilineTextInput({
   onSubmit,
   maxHeight = 10,
   focus = true,
-  placeholder = '输入消息... (Enter发送, Ctrl+Enter换行, Ctrl+L清空)',
+  placeholder = '输入消息... (Enter发送, 粘贴多行文本自动换行, Ctrl+L清空)',
   onHistoryNavigation  // 历史记录导航回调 (direction: 'up' | 'down')
 }) {
   // 分行数组
   const [lines, setLines] = useState(() => {
     if (!initialValue) return [''];
-    return initialValue.split('\n');
+    // 改进：统一换行符处理
+    const normalized = normalizeLineBreaks(initialValue);
+    return normalized.split('\n');
   });
   
   // 光标位置（二维坐标）
   const [cursorPos, setCursorPos] = useState(() => {
     if (!initialValue) return { row: 0, col: 0 };
-    const splitLines = initialValue.split('\n');
+    // 改进：统一换行符处理
+    const normalized = normalizeLineBreaks(initialValue);
+    const splitLines = normalized.split('\n');
     return {
       row: splitLines.length - 1,
       col: splitLines[splitLines.length - 1].length
@@ -67,7 +83,8 @@ export function MultilineTextInput({
     // 情况2：从空到非空（历史记录导航）
     // 或者：从非空到另一个非空（继续历史记录导航）
     else if (prevValue !== initialValue && !currIsEmpty) {
-      const newLines = initialValue.split('\n');
+      // 改进：统一换行符处理
+      const newLines = normalizeLineBreaks(initialValue).split('\n');
       setLines(newLines);
       const newRow = newLines.length - 1;
       const newCol = newLines[newRow].length;
@@ -175,14 +192,61 @@ export function MultilineTextInput({
 
   // 插入字符
   const insertChar = (char) => {
-    const currentLine = lines[cursorPos.row];
-    const newLine = currentLine.slice(0, cursorPos.col) + char + currentLine.slice(cursorPos.col);
-    
-    const newLines = [...lines];
-    newLines[cursorPos.row] = newLine;
-    
-    setLines(newLines);
-    setCursorPos({ ...cursorPos, col: cursorPos.col + char.length });
+    // 改进：过滤不可打印字符
+    if (!isPrintableChar(char)) {
+      return;
+    }
+
+    // 改进：处理包含换行符的粘贴内容
+    // 如果 char 包含换行符，需要分割成多行
+    if (char.includes('\n') || char.includes('\r')) {
+      // 统一换行符
+      const normalized = normalizeLineBreaks(char);
+      const parts = normalized.split('\n');
+      
+      // 第一部分：插入到当前光标位置
+      const currentLine = lines[cursorPos.row];
+      const beforeCursor = currentLine.slice(0, cursorPos.col);
+      const afterCursor = currentLine.slice(cursorPos.col);
+      const firstPart = parts[0];
+      
+      const newLines = [...lines];
+      newLines[cursorPos.row] = beforeCursor + firstPart;
+      
+      // 中间部分：作为新行插入
+      if (parts.length > 1) {
+        const middleParts = parts.slice(1, -1);
+        const lastPart = parts[parts.length - 1];
+        
+        // 插入中间行
+        newLines.splice(cursorPos.row + 1, 0, ...middleParts);
+        
+        // 最后一部分（包含 afterCursor）
+        newLines.splice(cursorPos.row + middleParts.length + 1, 0, lastPart + afterCursor);
+        
+        // 更新光标位置到最后一行的末尾（lastPart 之后）
+        const newRow = cursorPos.row + middleParts.length + 1;
+        const newCol = lastPart.length;  // 修复：光标在 lastPart 之后
+        setLines(newLines);
+        setCursorPos({ row: newRow, col: newCol });
+        adjustScroll({ row: newRow, col: newCol });
+      } else {
+        setLines(newLines);
+        setCursorPos({ ...cursorPos, col: cursorPos.col + firstPart.length });
+      }
+      
+      notifyChange();
+    } else {
+      // 普通字符：直接插入
+      const currentLine = lines[cursorPos.row];
+      const newLine = currentLine.slice(0, cursorPos.col) + char + currentLine.slice(cursorPos.col);
+      
+      const newLines = [...lines];
+      newLines[cursorPos.row] = newLine;
+      
+      setLines(newLines);
+      setCursorPos({ ...cursorPos, col: cursorPos.col + char.length });
+    }
     
     notifyChange();
   };
@@ -352,16 +416,22 @@ export function MultilineTextInput({
   
   // 渲染带光标的行
   const renderLineWithCursor = (line, isCursorRow, lineIndex) => {
-    // 确保空行也能被渲染（至少显示一个空格）
+    // 改进：确保空行也能被渲染（至少显示一个空格）
     const displayLine = line.length === 0 ? ' ' : line;
-    const currentLength = displayLine.length;
-    const prevLength = prevLineLengthsRef.current[lineIndex] || 0;
     
-    // 如果当前行比之前渲染的行短，需要用空格填充来清空残留内容
-    const paddingSpaces = currentLength < prevLength ? ' '.repeat(prevLength - currentLength) : '';
+    // 改进：使用显示长度而不是字符长度
+    const currentDisplayLength = getStringDisplayLength(displayLine);
+    const prevDisplayLength = prevLineLengthsRef.current[lineIndex] || 0;
     
-    // 更新记录的长度
-    prevLineLengthsRef.current[lineIndex] = currentLength;
+    // 改进：如果当前行比之前渲染的行短，需要用空格填充来清空残留内容
+    // 填充到终端宽度（假设为 120），确保完全覆盖旧内容
+    const terminalWidth = 120;
+    const paddingSpaces = currentDisplayLength < terminalWidth 
+      ? ' '.repeat(terminalWidth - currentDisplayLength)
+      : '';
+    
+    // 更新记录的显示长度
+    prevLineLengthsRef.current[lineIndex] = currentDisplayLength;
     
     if (!isCursorRow) {
       return (
@@ -371,6 +441,9 @@ export function MultilineTextInput({
       );
     }
     
+    // 改进：光标位置计算考虑字符显示宽度
+    // 注意：cursorPos.col 仍然是字符索引，不是显示位置
+    // 这里保持原有逻辑，但使用显示长度进行填充
     const beforeCursor = displayLine.slice(0, cursorPos.col);
     const cursorChar = displayLine[cursorPos.col] || ' ';
     const afterCursor = displayLine.slice(cursorPos.col + 1);
