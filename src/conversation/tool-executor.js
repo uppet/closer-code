@@ -86,6 +86,19 @@ export class ToolExecutor {
           .map(block => block.text)
           .join('\n');
 
+        // 关键修复：将助手响应添加到 conversation.messages
+        const assistantMessage = {
+          role: MessageType.ASSISTANT,
+          content: response.content
+        };
+
+        // DeepSeek-R1: 保留 reasoning_content 字段
+        if (response.reasoning_content !== undefined) {
+          assistantMessage.reasoning_content = response.reasoning_content;
+        }
+
+        this.conversation.messages.push(assistantMessage);
+
         return {
           hasToolCalls,
           fullTextContent,

@@ -18,6 +18,7 @@ import { ToolDetailPanel } from './components/tool-detail-view.jsx';
 import { safeSuspend, getPlatformName } from './utils/platform.js';
 import { useSmartThrottledState } from './hooks/use-throttled-state.js';
 import { executeSlashCommand } from './commands/slash-commands.js';
+import { exportToSimpleMarkdown, exportToFullMarkdown, saveMarkdown } from './utils/conversation-exporter.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -688,9 +689,13 @@ Type your message or command to get started.`
     setIsProcessing(true);
     setActivity('📤 发送消息到 AI...');
 
-    // 添加用户消息
-    const userMsg = { role: 'user', content: value };
-    setMessages(prev => [...prev, userMsg]);
+    // 添加用户消息（使用 messagesUpdate 以保持一致性）
+    const userMsg = { role: 'user', content: value, key: Date.now() };
+    messagesUpdate.updateSmart(prev => {
+      const newMessages = [...prev, userMsg];
+      console.log('[DEBUG] 添加用户消息后:', newMessages.map(m => ({ role: m.role, content: m.content?.substring(0, 20) })));
+      return newMessages;
+    }, 'user'); // 标记为 'user' 类型，确保立即更新
 
     // 估算用户消息的token数（在没有API计数的情况下使用）
     const userTokens = estimateUserTokens(value);
@@ -1012,17 +1017,59 @@ Type your message or command to get started.`
         if (args.length === 0) {
           setMessages(prev => [...prev, {
             role: 'system',
-            content: 'Usage: /export <filename> - Export conversation to a text file'
+            content: 'Usage: /export <filename> - Export conversation with thinking and dialogue content'
           }]);
           return;
         }
-        setActivity('📤 导出对话...');
+        setActivity('📤 导出对话（含 thinking）...');
         const filename = args.join(' ');
-        await exportConversation(conversation, filename);
-        setMessages(prev => [...prev, {
-          role: 'system',
-          content: `✅ Conversation exported to: ${filename}`
-        }]);
+        const exportResult = await exportConversation(conversation, filename, {
+          full: false,
+          toolExecutions: toolExecutions,
+          thinking: thinking,
+          tokenStats: tokenStats
+        });
+        if (exportResult.success) {
+          setMessages(prev => [...prev, {
+            role: 'system',
+            content: `✅ 对话已导出到: ${exportResult.path}`
+          }]);
+        } else {
+          setMessages(prev => [...prev, {
+            role: 'error',
+            content: `❌ 导出失败: ${exportResult.error}`
+          }]);
+        }
+        setActivity(null);
+        break;
+
+      case '/export_all':
+        if (args.length === 0) {
+          setMessages(prev => [...prev, {
+            role: 'system',
+            content: 'Usage: /export_all <filename> - Export conversation with full details (thinking, tools, stats)'
+          }]);
+          return;
+        }
+        setActivity('📤 导出完整对话（包含所有细节）...');
+        const fullFilename = args.join(' ');
+        const fullExportResult = await exportConversation(conversation, fullFilename, {
+          full: true,
+          toolExecutions: toolExecutions,
+          thinking: thinking,
+          tokenStats: tokenStats
+        });
+        if (fullExportResult.success) {
+          setMessages(prev => [...prev, {
+            role: 'system',
+            content: `✅ 完整对话已导出到: ${fullExportResult.path}`
+          }]);
+        } else {
+          setMessages(prev => [...prev, {
+            role: 'error',
+            content: `❌ 导出失败: ${fullExportResult.error}`
+          }]);
+        }
         setActivity(null);
         break;
 
@@ -1040,17 +1087,21 @@ Type your message or command to get started.`
       case '/help':
         setMessages(prev => [...prev, {
           role: 'system',
-          content: `Available commands:
-/clear - Clear conversation history
-/export <filename> - Export conversation to a text file
-/plan <task> - Create and execute a task plan
-/learn - Learn project patterns
-/status - Show conversation summary
-/history - Show input history statistics
-/keys - Show keyboard shortcuts reference
-/config - Show current configuration
-/skills - Show skills system status
-/help - Show this help message`
+          content: `可用命令：
+📝 对话命令
+  /clear         清除对话历史
+  /export <file> 导出对话（含 thinking 和对话内容）
+  /export_all <file> 导出完整对话（含 thinking、工具详情、统计等）
+  /plan <task>   创建并执行任务计划
+  /learn         学习项目模式
+  /status        显示对话摘要
+  /history       显示输入历史统计
+
+ℹ️  信息命令
+  /keys          显示键盘快捷键参考
+  /config        显示当前配置
+  /skills        显示技能系统状态
+  /help          显示本帮助信息`
         }]);
         break;
 
@@ -1367,70 +1418,20 @@ Tips:
   );
 }
 
-// 导出对话到文本文件
-export async function exportConversation(conversation, filename) {
+// 导出对话到文件（使用新的导出工具）
+async function exportConversation(conversation, filename, options = {}) {
   try {
-    const exportData = conversation.export();
-    const messages = exportData.messages || [];
+    const { full = false, toolExecutions = [], thinking = [], tokenStats = null } = options;
 
-    // 生成文本格式
-    let textContent = '';
-    textContent += '='.repeat(80) + '\n';
-    textContent += 'Closer Code - Conversation Export\n';
-    textContent += '='.repeat(80) + '\n';
-    textContent += `Export Date: ${new Date().toLocaleString('zh-CN')}\n`;
-    textContent += `Total Messages: ${messages.length}\n`;
-    textContent += '='.repeat(80) + '\n\n';
+    // 根据选项选择导出格式
+    const markdown = full
+      ? exportToFullMarkdown(conversation, toolExecutions, thinking, tokenStats)
+      : exportToSimpleMarkdown(conversation, toolExecutions, thinking);
 
-    messages.forEach((msg, index) => {
-      const role = msg.role || 'unknown';
-      const roleLabel = {
-        'user': '👤 User',
-        'assistant': '🤖 Assistant',
-        'system': 'ℹ️ System',
-        'error': '❌ Error'
-      }[role] || role;
+    // 保存到文件
+    const result = saveMarkdown(markdown, filename);
 
-      textContent += `[${index + 1}] ${roleLabel}\n`;
-      textContent += '-'.repeat(80) + '\n';
-
-      const content = msg.content;
-      if (typeof content === 'string') {
-        textContent += content + '\n';
-      } else if (Array.isArray(content)) {
-        // 处理工具调用等复杂内容
-        content.forEach(block => {
-          if (block.type === 'text') {
-            textContent += block.text + '\n';
-          } else if (block.type === 'tool_use') {
-            textContent += `[Tool: ${block.name}]\n`;
-            textContent += JSON.stringify(block.input, null, 2) + '\n';
-          } else if (block.type === 'tool_result') {
-            textContent += `[Tool Result]\n`;
-            textContent += block.content + '\n';
-          }
-        });
-      } else {
-        textContent += JSON.stringify(content, null, 2) + '\n';
-      }
-
-      textContent += '\n';
-    });
-
-    textContent += '='.repeat(80) + '\n';
-    textContent += 'End of Export\n';
-    textContent += '='.repeat(80) + '\n';
-
-    // 确保文件名有 .txt 扩展名
-    let finalFilename = filename;
-    if (!filename.endsWith('.txt')) {
-      finalFilename = filename + '.txt';
-    }
-
-    // 写入文件
-    fs.writeFileSync(finalFilename, textContent, 'utf-8');
-
-    return { success: true, path: finalFilename };
+    return result;
   } catch (error) {
     return { success: false, error: error.message };
   }
